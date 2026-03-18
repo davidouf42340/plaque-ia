@@ -13,8 +13,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 })
 
-const PORT = process.env.PORT || 3000
-
 // dossiers
 const previewDir = "generated/previews"
 const pictoDir = "generated/pictos"
