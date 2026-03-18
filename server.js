@@ -1,207 +1,365 @@
-import express from "express"
-import cors from "cors"
-import fs from "fs"
-import path from "path"
-import sharp from "sharp"
-import { OpenAI } from "openai"
+import express from "express";
+import cors from "cors";
+import fs from "fs";
+import path from "path";
+import sharp from "sharp";
+import { OpenAI } from "openai";
 
-const app = express()
-app.use(cors())
-app.use(express.json())
+const app = express();
+app.use(cors());
+app.use(express.json());
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
-})
+});
 
-// dossiers
-const previewDir = "generated/previews"
-const pictoDir = "generated/pictos"
-const productionDir = "generated/production"
+const PORT = 3000;
 
-if (!fs.existsSync("generated")) fs.mkdirSync("generated")
-if (!fs.existsSync(previewDir)) fs.mkdirSync(previewDir)
-if (!fs.existsSync(pictoDir)) fs.mkdirSync(pictoDir)
-if (!fs.existsSync(productionDir)) fs.mkdirSync(productionDir)
+/* =========================
+   DOSSIERS
+========================= */
 
-app.use("/generated", express.static("generated"))
+const previewDir = "generated/previews";
+const productionDir = "generated/production";
+const pictoDir = "generated/pictos";
+const materialsDir = "materials";
+const creationsFile = "creations.json";
+const localPictosDir = "pictos";
 
-// couleurs foncées = texte blanc
-const darkMaterials = ["noirB", "noirM", "noyer", "rose", "gris"]
+for (const dir of ["generated", previewDir, productionDir, pictoDir, materialsDir, localPictosDir]) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+if (!fs.existsSync(creationsFile)) fs.writeFileSync(creationsFile, "[]");
+
+app.use("/generated", express.static("generated"));
+app.use("/pictos", express.static("pictos"));
+app.use("/materials", express.static("materials"));
+
+/* =========================
+   CONFIG
+========================= */
+
+const VALID_MATERIALS = [
+  "acier",
+  "blanc",
+  "cuivre",
+  "gris",
+  "noirB",
+  "noirM",
+  "noyer",
+  "or",
+  "rose"
+];
+
+const THICKNESS_RULES = {
+  "1.6": ["acier", "blanc", "cuivre", "gris", "noirB", "noirM", "noyer", "or", "rose"],
+  "3.2": ["acier", "blanc", "cuivre", "or", "noirM"]
+};
+
+const WHITE_ON = ["noirM", "noirB", "noyer", "rose", "gris"];
 
 function textColor(material) {
-  return darkMaterials.includes(material) ? "#ffffff" : "#000000"
+  return WHITE_ON.includes(material) ? "#ffffff" : "#000000";
 }
 
-// base64
+/* =========================
+   UTILS
+========================= */
+
+function slugify(str = "") {
+  return String(str)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9.-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function escapeXml(str = "") {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function mmToPx(mm, dpi = 600) {
+  return Math.round((mm / 25.4) * dpi);
+}
+
+function getRealPxSize(dimension) {
+  const [wMm, hMm] = dimension.split("x").map(Number);
+  return {
+    width: mmToPx(wMm, 600),
+    height: mmToPx(hMm, 600)
+  };
+}
+
+/* =========================
+   DATA
+========================= */
+
+function loadCreations() {
+  return JSON.parse(fs.readFileSync(creationsFile, "utf8"));
+}
+
+function saveCreations(data) {
+  fs.writeFileSync(creationsFile, JSON.stringify(data, null, 2));
+}
+
+function addCreation(data) {
+  const creations = loadCreations();
+  creations.unshift(data);
+  saveCreations(creations);
+}
+
+function getCreation(id) {
+  return loadCreations().find((c) => c.id === id);
+}
+
+/* =========================
+   FICHIERS
+========================= */
+
 function fileToDataUri(filePath) {
-  const ext = path.extname(filePath)
-  const mime =
-    ext === ".svg"
-      ? "image/svg+xml"
-      : ext === ".png"
-      ? "image/png"
-      : "application/octet-stream"
-
-  const file = fs.readFileSync(filePath)
-  return `data:${mime};base64,${file.toString("base64")}`
+  const file = fs.readFileSync(filePath);
+  return `data:image/png;base64,${file.toString("base64")}`;
 }
 
-// génération picto IA (avec cache simple)
-async function generatePicto(prompt) {
+function getMaterialDataUri(material) {
+  const filePath = path.join(materialsDir, `${material}.jpg`);
+  if (!fs.existsSync(filePath)) throw new Error("matière introuvable");
+  return fileToDataUri(filePath);
+}
 
-  const fileNameSafe = prompt.replace(/[^a-z0-9]/gi, "_").toLowerCase()
-  const existing = `${pictoDir}/${fileNameSafe}.png`
+/* =========================
+   PICTOS
+========================= */
 
-  if (fs.existsSync(existing)) {
-    return existing
-  }
+async function generatePicto(name) {
+  const key = slugify(name);
+  const filePath = path.join(pictoDir, `${key}.png`);
+
+  if (fs.existsSync(filePath)) return filePath;
 
   const response = await openai.images.generate({
     model: "gpt-image-1",
-    prompt: `black engraving icon, simple, no color, transparent background, ${prompt}`,
+    prompt: `black icon engraving style transparent background ${name}`,
     size: "1024x1024",
     background: "transparent"
-  })
+  });
 
-  const base64 = response.data[0].b64_json
-
-  fs.writeFileSync(existing, Buffer.from(base64, "base64"))
-
-  return existing
+  fs.writeFileSync(filePath, Buffer.from(response.data[0].b64_json, "base64"));
+  return filePath;
 }
 
-// SVG preview + prod IDENTIQUE
-async function buildSvg({
-  line1 = "",
-  line2 = "",
-  line3 = "",
-  iconLeft = "",
-  iconRight = "",
-  material = "acier"
-}) {
-
-  const textCol = textColor(material)
-
-  let iconLeftData = ""
-  let iconRightData = ""
-
-  if (iconLeft) iconLeftData = fileToDataUri(iconLeft)
-  if (iconRight) iconRightData = fileToDataUri(iconRight)
-
-  return `
-<svg width="1200" height="300" viewBox="0 0 1200 300" xmlns="http://www.w3.org/2000/svg">
-
-<rect width="1200" height="300" fill="transparent"/>
-
-${
-iconLeftData
-?
-`<image href="${iconLeftData}" x="0" y="15" width="270" height="270"/>`
-:
-""
+async function resolvePicto(name) {
+  if (!name) return "";
+  return await generatePicto(name);
 }
 
-${
-iconRightData
-?
-`<image href="${iconRightData}" x="930" y="15" width="270" height="270"/>`
-:
-""
+/* =========================
+   IA TEXTE
+========================= */
+
+async function parsePrompt(prompt) {
+  const res = await openai.chat.completions.create({
+    model: "gpt-4.1-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `Retourne JSON {line1,line2,line3,icon_left,icon_right}`
+      },
+      { role: "user", content: prompt }
+    ]
+  });
+
+  return JSON.parse(res.choices[0].message.content);
 }
 
-<text x="600" y="120" font-size="80" text-anchor="middle" fill="${textCol}" font-family="Arial">${line1}</text>
+/* =========================
+   LAYOUT UNIQUE
+========================= */
 
-<text x="600" y="200" font-size="80" text-anchor="middle" fill="${textCol}" font-family="Arial">${line2}</text>
+function computeLayout(W, H, hasLeft, hasRight) {
+  const iconW = W * 0.25;
+  const iconH = H * 0.9;
 
-<text x="600" y="280" font-size="80" text-anchor="middle" fill="${textCol}" font-family="Arial">${line3}</text>
+  let textStart = 0;
+  let textEnd = W;
 
-</svg>
-`
-}
-
-// conversion PNG 600 DPI
-async function svgToPng(svg, outputPath) {
-
-  const buffer = Buffer.from(svg)
-
-  await sharp(buffer)
-    .resize(7087, 1772) // équivalent 300mm à 600 DPI
-    .png({
-      compressionLevel: 9,
-      quality: 100
-    })
-    .toFile(outputPath)
-}
-
-// API principale
-app.post("/compose", async (req, res) => {
-
-  try {
-
-    const { prompt, material } = req.body
-
-    let line1 = ""
-    let line2 = ""
-    let line3 = ""
-
-    if (prompt) {
-      const lines = prompt.split(",")
-      line1 = lines[0] || ""
-      line2 = lines[1] || ""
-      line3 = lines[2] || ""
-    }
-
-    let iconLeft = ""
-    let iconRight = ""
-
-    if (prompt.toLowerCase().includes("chien") || prompt.toLowerCase().includes("chat")) {
-      iconLeft = await generatePicto(prompt)
-    }
-
-    if (prompt.toLowerCase().includes("maison") || prompt.toLowerCase().includes("foot")) {
-      iconRight = await generatePicto(prompt)
-    }
-
-    const svg = await buildSvg({
-      line1,
-      line2,
-      line3,
-      iconLeft,
-      iconRight,
-      material
-    })
-
-    const previewName = `preview-${Date.now()}.svg`
-    const previewPath = `${previewDir}/${previewName}`
-
-    fs.writeFileSync(previewPath, svg)
-
-    const productionName = `prod-${Date.now()}.png`
-    const productionPath = `${productionDir}/${productionName}`
-
-    await svgToPng(svg, productionPath)
-
-    res.json({
-      preview: `${req.protocol}://${req.get("host")}/${previewPath}`,
-      production: `${req.protocol}://${req.get("host")}/${productionPath}`
-    })
-
-  } catch (e) {
-
-    console.log(e)
-    res.status(500).json({ error: "erreur serveur" })
-
+  if (hasLeft && hasRight) {
+    textStart = W * 0.25;
+    textEnd = W * 0.75;
+  } else if (hasRight) {
+    textEnd = W * 0.75;
+  } else if (hasLeft) {
+    textStart = W * 0.25;
   }
 
-})
+  return {
+    iconW,
+    iconH,
+    textCenter: (textStart + textEnd) / 2
+  };
+}
 
-// test route
-app.get("/", (req, res) => {
-  res.status(200).send("Serveur IA OK");
+/* =========================
+   BUILD SVG
+========================= */
+
+function buildSvg({
+  W,
+  H,
+  materialData,
+  transparent,
+  line1,
+  line2,
+  line3,
+  iconLeftData,
+  iconRightData,
+  color
+}) {
+  const lines = [line1, line2, line3].filter(Boolean);
+  const layout = computeLayout(W, H, !!iconLeftData, !!iconRightData);
+
+  return `
+<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  ${
+    transparent
+      ? ""
+      : `<image href="${materialData}" width="${W}" height="${H}" />`
+  }
+
+  ${
+    iconLeftData
+      ? `<image href="${iconLeftData}" x="0" y="0" width="${layout.iconW}" height="${layout.iconH}" />`
+      : ""
+  }
+
+  ${
+    iconRightData
+      ? `<image href="${iconRightData}" x="${W - layout.iconW}" y="0" width="${layout.iconW}" height="${layout.iconH}" />`
+      : ""
+  }
+
+  ${lines
+    .map(
+      (l, i) => `
+    <text x="${layout.textCenter}" y="${H / 2 + i * 60}" 
+      font-size="60" text-anchor="middle" fill="${color}">
+      ${escapeXml(l)}
+    </text>`
+    )
+    .join("")}
+</svg>
+`;
+}
+
+async function svgToPng(svg, output, dpi = 600) {
+  await sharp(Buffer.from(svg), { density: dpi })
+    .png()
+    .toFile(output);
+}
+
+/* =========================
+   ROUTE PRINCIPALE
+========================= */
+
+app.post("/compose", async (req, res) => {
+  try {
+    const {
+      prompt,
+      material,
+      dimension,
+      thickness,
+      line1,
+      line2,
+      line3
+    } = req.body;
+
+    if (!VALID_MATERIALS.includes(material)) {
+      return res.status(400).json({ error: "matériau invalide" });
+    }
+
+    if (!THICKNESS_RULES[thickness]?.includes(material)) {
+      return res.status(400).json({ error: "épaisseur incompatible" });
+    }
+
+    let parsed = await parsePrompt(prompt);
+
+    if (line1 || line2 || line3) {
+      parsed.line1 = line1 || "";
+      parsed.line2 = line2 || "";
+      parsed.line3 = line3 || "";
+    }
+
+    const iconLeft = await resolvePicto(parsed.icon_left);
+    const iconRight = await resolvePicto(parsed.icon_right);
+
+    const iconLeftData = iconLeft ? fileToDataUri(iconLeft) : "";
+    const iconRightData = iconRight ? fileToDataUri(iconRight) : "";
+
+    const PREVIEW_W = 1200;
+    const PREVIEW_H = 300;
+
+    const real = getRealPxSize(dimension);
+
+    const previewSvg = buildSvg({
+      W: PREVIEW_W,
+      H: PREVIEW_H,
+      materialData: getMaterialDataUri(material),
+      transparent: false,
+      line1: parsed.line1,
+      line2: parsed.line2,
+      line3: parsed.line3,
+      iconLeftData,
+      iconRightData,
+      color: textColor(material)
+    });
+
+    const productionSvg = buildSvg({
+      W: real.width,
+      H: real.height,
+      materialData: "",
+      transparent: true,
+      line1: parsed.line1,
+      line2: parsed.line2,
+      line3: parsed.line3,
+      iconLeftData,
+      iconRightData,
+      color: "#000"
+    });
+
+    const id = `job-${Date.now()}`;
+
+    const previewPath = `${previewDir}/${id}.png`;
+    const productionPath = `${productionDir}/${id}.png`;
+
+    await svgToPng(previewSvg, previewPath, 300);
+    await svgToPng(productionSvg, productionPath, 600);
+
+    const creation = {
+      id,
+      preview: "/" + previewPath,
+      production: "/" + productionPath,
+      ...parsed
+    };
+
+    addCreation(creation);
+
+    res.json({
+      previewUrl: creation.preview,
+      productionUrl: creation.production,
+      creationId: id
+    });
+  } catch (e) {
+    console.log(e);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Serveur IA lancé sur le port " + PORT);
+app.listen(PORT, () => {
+  console.log("OK serveur lancé");
 });
