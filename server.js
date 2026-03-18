@@ -198,10 +198,6 @@ app.post("/compose", async (req, res) => {
 })
 
 // test route
-app.get("/", (req, res) => {
-  res.send("Serveur IA OK")
-})
-
-app.listen(PORT, () => {
-  console.log("Serveur IA lancé sur le port " + PORT)
-})
+app.get("/health", (req, res) => {
+  res.status(200).json({ ok: true });
+});
