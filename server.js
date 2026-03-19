@@ -14,6 +14,9 @@ app.use(cors({
 
 // IMPORTANT
 app.options("*", cors());
+
+// IMPORTANT
+app.options("*", cors());
 app.use(express.json({ limit: "10mb" }));
 
 const openai = new OpenAI({
