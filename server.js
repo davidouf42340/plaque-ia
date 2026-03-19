@@ -7,8 +7,6 @@ import bodyParser from "body-parser";
 const app = express();
 app.use(bodyParser.json({ limit: "10mb" }));
 
-const PORT = process.env.PORT || 3000;
-
 // === DOSSIERS ===
 const GENERATED_DIR = "generated";
 const PREVIEW_DIR = path.join(GENERATED_DIR, "previews");
@@ -162,7 +160,12 @@ app.post("/compose", async (req, res) => {
 // === STATIC ===
 app.use("/generated", express.static("generated"));
 
-// === START ===
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.get("/", (req, res) => {
+  res.send("Serveur IA Plaques OK 🚀");
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Serveur IA lancé sur le port " + PORT);
 });
