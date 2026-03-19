@@ -6,7 +6,14 @@ import sharp from "sharp";
 import { OpenAI } from "openai";
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+// IMPORTANT
+app.options("*", cors());
 app.use(express.json({ limit: "10mb" }));
 
 const openai = new OpenAI({
