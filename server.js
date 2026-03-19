@@ -6,16 +6,13 @@ import sharp from "sharp";
 import { OpenAI } from "openai";
 
 const app = express();
+
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// IMPORTANT
-app.options("*", cors());
-
-// IMPORTANT
 app.options("*", cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -32,8 +29,6 @@ for (const dir of ["generated", previewDir, productionDir, pictoDir]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 if (!fs.existsSync(creationsFile)) fs.writeFileSync(creationsFile, "[]");
-
-app.use("/generated", express.static("generated"));
 
 const VALID_MATERIALS = ["acier", "blanc", "cuivre", "gris", "noirB", "noirM", "noyer", "or", "rose"];
 const THICKNESS_RULES = {
@@ -148,8 +143,8 @@ async function parsePrompt(prompt = "") {
 Règles:
 - 3 lignes max
 - si un seul pictogramme sans précision, mets-le à droite
-- si gauche demandé, mets à gauche
-- si droite demandé, mets à droite`
+- si gauche demandé, mets-le à gauche
+- si droite demandé, mets-le à droite`
         },
         { role: "user", content: prompt }
       ]
@@ -555,12 +550,8 @@ app.post("/compose", async (req, res) => {
     });
   }
 });
-// === STATIC ===
-app.use("/generated", express.static("generated"));
 
-app.get("/", (req, res) => {
-  res.send("Serveur IA Plaques OK 🚀");
-});
+app.use("/generated", express.static("generated"));
 
 const PORT = process.env.PORT || 3000;
 
