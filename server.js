@@ -113,9 +113,6 @@ app.post("/compose", async (req, res) => {
 
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Serveur IA lancé sur le port " + PORT);
-});
 app.get("/", (req, res) => {
   res.status(200).send("Serveur IA OK");
 });
