@@ -1,369 +1,165 @@
-document.addEventListener("DOMContentLoaded", () => {
-  const $ = (id) => document.getElementById(id);
+import express from "express";
+import cors from "cors";
+import fs from "fs";
+import path from "path";
+import sharp from "sharp";
+import { OpenAI } from "openai";
 
-  const lineInputs = {
-    1: $("input-line1"),
-    2: $("input-line2"),
-    3: $("input-line3")
-  };
+const app = express();
 
-  const lineEls = {
-    1: $("line1"),
-    2: $("line2"),
-    3: $("line3")
-  };
+app.use(cors());
+app.use(express.json({ limit: "20mb" }));
 
-  const fontSelects = {
-    1: $("font-select-1"),
-    2: $("font-select-2"),
-    3: $("font-select-3")
-  };
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
-  const sizeDisplays = {
-    1: $("line1-size-display"),
-    2: $("line2-size-display"),
-    3: $("line3-size-display")
-  };
+const GENERATED_DIR = "generated";
 
-  const minusBtns = {
-    1: $("line1-minus"),
-    2: $("line2-minus"),
-    3: $("line3-minus")
-  };
+if (!fs.existsSync(GENERATED_DIR)) {
+  fs.mkdirSync(GENERATED_DIR, { recursive: true });
+}
 
-  const plusBtns = {
-    1: $("line1-plus"),
-    2: $("line2-plus"),
-    3: $("line3-plus")
-  };
+app.use("/generated", express.static(GENERATED_DIR));
 
-  const textZone = $("plaque-text-zone");
-  const plaqueBase = $("plaque-base");
-  const overlay = $("plaque-overlay");
-  const overlayInput = $("overlay-url");
+function buildPrompt({ engravingColor, leftIcon, rightIcon }) {
+  const color = engravingColor === "white" ? "white" : "black";
 
-  const logoMode = $("logo-mode");
-  const oneLogoSide = $("one-logo-side");
-  const oneLogoInput = $("one-logo-input");
-  const pictoLeft = $("picto-left");
-  const pictoRight = $("picto-right");
+  return `
+Create a clean engraving overlay for a professional nameplate.
 
-  const oneLogoSideWrap = $("one-logo-side-wrap");
-  const oneLogoInputWrap = $("one-logo-input-wrap");
-  const leftLogoInputWrap = $("left-logo-input-wrap");
-  const rightLogoInputWrap = $("right-logo-input-wrap");
+STRICT RULES:
+- transparent background ONLY
+- no plate
+- no rectangle
+- no border
+- no frame
+- no text
+- no letters
+- no words
+- no typography
+- no background pattern
+- no decoration in center
 
-  const generateBtn = $("generate-btn");
-  const progressWrap = $("plaque-progress-wrap");
-  const progressFill = $("plaque-progress-fill");
-  const progressText = $("plaque-progress-text");
+LAYOUT:
+- horizontal layout (4:1 ratio)
+- left icon must be fully on the LEFT side
+- right icon must be fully on the RIGHT side
+- center must remain COMPLETELY EMPTY
+- nothing allowed in the center area
+- do not center anything
 
-  if (
-    !textZone || !plaqueBase || !overlay || !overlayInput ||
-    !logoMode || !oneLogoSide || !oneLogoInput || !pictoLeft || !pictoRight ||
-    !generateBtn || !progressWrap || !progressFill || !progressText
-  ) {
-    console.error("Configurateur introuvable.");
-    return;
-  }
+LEFT ICON:
+${leftIcon || "none"}
 
-  const SERVER_BASE = "https://plaque-ia-production.up.railway.app";
-  const GENERATE_ENDPOINT = `${SERVER_BASE}/generate-plaque-base`;
+RIGHT ICON:
+${rightIcon || "none"}
 
-  const PLAQUE_BACKGROUNDS = {
-    "acier brossé": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/acier-fd.png",
-    "blanc": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/blanc-fd.png",
-    "cuivre": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/cuivre-fd.png",
-    "gris": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/gris-fd.png",
-    "noir brillant": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noirm-fd.png",
-    "noir": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noir-fd.png",
-    "noyer": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noyer-fd.png",
-    "or brossé": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/or-fd.png",
-    "rose": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/rose-fd.png"
-  };
+STYLE:
+- minimal
+- engraving style
+- thin lines
+- clean vector
+- professional
+- balanced composition
 
-  const lineSizes = {
-    1: 32,
-    2: 22,
-    3: 18
-  };
+COLOR:
+- use ONLY ${color}
+- everything else must be transparent
 
-  const lineMin = {
-    1: 16,
-    2: 12,
-    3: 10
-  };
+IMPORTANT:
+- icons must be small
+- do not place anything in the center
+- keep wide empty space in the middle
 
-  const lineMax = {
-    1: 60,
-    2: 48,
-    3: 40
-  };
+OUTPUT:
+- transparent PNG
+- left and/or right icons only
+`.trim();
+}
 
-  function updateLineStyles() {
-    textZone.style.setProperty("--line1-size", `${lineSizes[1]}px`);
-    textZone.style.setProperty("--line2-size", `${lineSizes[2]}px`);
-    textZone.style.setProperty("--line3-size", `${lineSizes[3]}px`);
-
-    textZone.style.setProperty("--line1-font", fontSelects[1].value);
-    textZone.style.setProperty("--line2-font", fontSelects[2].value);
-    textZone.style.setProperty("--line3-font", fontSelects[3].value);
-
-    sizeDisplays[1].value = `${Math.round((lineSizes[1] / 32) * 100)}%`;
-    sizeDisplays[2].value = `${Math.round((lineSizes[2] / 22) * 100)}%`;
-    sizeDisplays[3].value = `${Math.round((lineSizes[3] / 18) * 100)}%`;
-  }
-
-  function updatePreviewText() {
-    lineEls[1].textContent = lineInputs[1].value || "";
-    lineEls[2].textContent = lineInputs[2].value || "";
-    lineEls[3].textContent = lineInputs[3].value || "";
-    updateLineStyles();
-  }
-
-  function updateLogoFieldsVisibility() {
-    const mode = logoMode.value;
-
-    oneLogoSideWrap.style.display = mode === "one" ? "grid" : "none";
-    oneLogoInputWrap.style.display = mode === "one" ? "grid" : "none";
-
-    leftLogoInputWrap.style.display = mode === "two" ? "grid" : "none";
-    rightLogoInputWrap.style.display = mode === "two" ? "grid" : "none";
-
-    textZone.classList.remove("logo-none", "logo-left", "logo-right", "logo-two");
-
-    if (mode === "none") {
-      textZone.classList.add("logo-none");
-    } else if (mode === "one" && oneLogoSide.value === "left") {
-      textZone.classList.add("logo-left");
-    } else if (mode === "one" && oneLogoSide.value === "right") {
-      textZone.classList.add("logo-right");
-    } else {
-      textZone.classList.add("logo-two");
-    }
-  }
-
-  function getSelectedVariant() {
-    const variantIdInput = document.querySelector('input[name="id"]');
-    if (!variantIdInput || !window.productVariants) return null;
-
-    const variantId = variantIdInput.value;
-    return window.productVariants.find(
-      (variant) => String(variant.id) === String(variantId)
-    ) || null;
-  }
-
-  function getSelectedColor() {
-    const variant = getSelectedVariant();
-    if (!variant) return "blanc";
-
-    const options = variant.options || [];
-
-    for (const opt of options) {
-      const value = String(opt).toLowerCase();
-
-      if (value.includes("acier")) return "acier brossé";
-      if (value.includes("cuivre")) return "cuivre";
-      if (value.includes("or")) return "or brossé";
-      if (value.includes("blanc")) return "blanc";
-      if (value.includes("noir brillant")) return "noir brillant";
-      if (value.includes("noir")) return "noir";
-      if (value.includes("noyer")) return "noyer";
-      if (value.includes("gris")) return "gris";
-      if (value.includes("rose")) return "rose";
-    }
-
-    return "blanc";
-  }
-
-  function getEngravingColor(plateColor) {
-    const color = plateColor.toLowerCase();
-
-    const blackEngraving = ["acier brossé", "cuivre", "or brossé", "blanc"];
-    const whiteEngraving = ["rose", "noyer", "gris", "noir", "noir brillant"];
-
-    if (blackEngraving.some((c) => color.includes(c))) return "black";
-    if (whiteEngraving.some((c) => color.includes(c))) return "white";
-
-    return "black";
-  }
-
-  function updatePlaqueBackground(plateColor) {
-    const color = plateColor.toLowerCase();
-
-    for (const key in PLAQUE_BACKGROUNDS) {
-      if (color.includes(key)) {
-        plaqueBase.src = PLAQUE_BACKGROUNDS[key];
-        return;
-      }
-    }
-
-    plaqueBase.src = PLAQUE_BACKGROUNDS["blanc"];
-  }
-
-  function bindVariantListeners() {
-    const variantSelectors = document.querySelectorAll(
-      'input[name="id"], .product-form__input input[type="radio"], .product-form__input select, variant-selects select, variant-radios input'
-    );
-
-    variantSelectors.forEach((el) => {
-      el.addEventListener("change", () => {
-        updatePlaqueBackground(getSelectedColor());
-      });
-    });
-  }
-
-  function getLogoPayload() {
-    const mode = logoMode.value;
-
-    if (mode === "none") {
-      return { leftIcon: "", rightIcon: "" };
-    }
-
-    if (mode === "one") {
-      const icon = oneLogoInput.value.trim();
-      if (oneLogoSide.value === "left") {
-        return { leftIcon: icon, rightIcon: "" };
-      }
-      return { leftIcon: "", rightIcon: icon };
-    }
-
-    return {
-      leftIcon: pictoLeft.value.trim(),
-      rightIcon: pictoRight.value.trim()
-    };
-  }
-
-  let progressTimer = null;
-
-  function startProgress() {
-    progressWrap.hidden = false;
-    progressFill.style.width = "0%";
-    progressText.textContent = "Préparation de votre plaque...";
-    let value = 0;
-
-    clearInterval(progressTimer);
-    progressTimer = setInterval(() => {
-      if (value < 88) {
-        value += Math.random() * 12;
-        progressFill.style.width = `${Math.min(value, 88)}%`;
-      }
-
-      if (value < 30) {
-        progressText.textContent = "Analyse de votre demande...";
-      } else if (value < 60) {
-        progressText.textContent = "Création des logos par l’IA...";
-      } else {
-        progressText.textContent = "Finalisation de votre plaque...";
-      }
-    }, 300);
-  }
-
-  function finishProgress() {
-    clearInterval(progressTimer);
-    progressFill.style.width = "100%";
-    progressText.textContent = "Plaque générée";
-    setTimeout(() => {
-      progressWrap.hidden = true;
-      progressFill.style.width = "0%";
-      progressText.textContent = "Préparation...";
-    }, 800);
-  }
-
-  function failProgress() {
-    clearInterval(progressTimer);
-    progressFill.style.width = "0%";
-    progressText.textContent = "Erreur de génération";
-    setTimeout(() => {
-      progressWrap.hidden = true;
-      progressText.textContent = "Préparation...";
-    }, 1200);
-  }
-
-  [1, 2, 3].forEach((index) => {
-    lineInputs[index].addEventListener("input", updatePreviewText);
-    fontSelects[index].addEventListener("change", updatePreviewText);
-
-    minusBtns[index].addEventListener("click", () => {
-      lineSizes[index] = Math.max(lineMin[index], lineSizes[index] - 2);
-      updateLineStyles();
-    });
-
-    plusBtns[index].addEventListener("click", () => {
-      lineSizes[index] = Math.min(lineMax[index], lineSizes[index] + 2);
-      updateLineStyles();
-    });
+async function generateOverlayImage({ prompt, outputPath, width, height }) {
+  const result = await openai.images.generate({
+    model: "gpt-image-1",
+    size: "1024x1024",
+    prompt
   });
 
-  logoMode.addEventListener("change", updateLogoFieldsVisibility);
-  oneLogoSide.addEventListener("change", updateLogoFieldsVisibility);
+  const b64 = result?.data?.[0]?.b64_json;
 
-  updatePreviewText();
-  updateLogoFieldsVisibility();
-  updatePlaqueBackground(getSelectedColor());
-  bindVariantListeners();
+  if (!b64) {
+    console.error("Réponse OpenAI inattendue :", JSON.stringify(result, null, 2));
+    throw new Error("Image vide retournée par OpenAI.");
+  }
 
-  generateBtn.addEventListener("click", async () => {
-    generateBtn.disabled = true;
-    generateBtn.textContent = "Génération en cours...";
-    startProgress();
+  const buffer = Buffer.from(b64, "base64");
 
-    try {
-      const plateColor = getSelectedColor();
-      const engravingColor = getEngravingColor(plateColor);
-      const logos = getLogoPayload();
+  await sharp(buffer)
+    .resize(width, height, {
+      fit: "contain",
+      background: { r: 255, g: 255, b: 255, alpha: 0 }
+    })
+    .png()
+    .toFile(outputPath);
+}
 
-      updatePlaqueBackground(plateColor);
+app.post("/generate-plaque-base", async (req, res) => {
+  try {
+    const {
+      plateColor,
+      engravingColor = "black",
+      leftIcon = "",
+      rightIcon = "",
+      style = "premium"
+    } = req.body;
 
-      const payload = {
-        plateColor,
-        engravingColor,
-        leftIcon: logos.leftIcon,
-        rightIcon: logos.rightIcon,
-        style: "premium"
-      };
-
-      const response = await fetch(GENERATE_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
+    if (!plateColor) {
+      return res.status(400).json({
+        error: "plateColor est obligatoire."
       });
-
-      const rawText = await response.text();
-
-      let data = {};
-      try {
-        data = JSON.parse(rawText);
-      } catch (e) {
-        throw new Error("Le serveur n'a pas renvoyé du JSON : " + rawText);
-      }
-
-      if (!response.ok) {
-        throw new Error(data.details || data.error || `HTTP ${response.status}`);
-      }
-
-      const returnedUrl = data.preview?.url || data.url;
-      if (!returnedUrl) {
-        throw new Error("Pas d'image renvoyée par le serveur.");
-      }
-
-      const imageUrl = returnedUrl.startsWith("http")
-        ? returnedUrl
-        : `${SERVER_BASE}${returnedUrl}`;
-
-      overlay.src = imageUrl;
-      overlayInput.value = imageUrl;
-
-      finishProgress();
-    } catch (e) {
-      console.error("Erreur génération complète :", e);
-      failProgress();
-      alert("Erreur génération : " + e.message);
-    } finally {
-      generateBtn.disabled = false;
-      generateBtn.textContent = "Générer ma plaque par l’IA";
     }
-  });
+
+    const prompt = buildPrompt({
+      engravingColor,
+      leftIcon,
+      rightIcon
+    });
+
+    const fileName = `${Date.now()}.png`;
+    const outputPath = path.join(GENERATED_DIR, fileName);
+
+    await generateOverlayImage({
+      prompt,
+      outputPath,
+      width: 1200,
+      height: 300
+    });
+
+    return res.json({
+      plateColor,
+      engravingColor,
+      preview: {
+        url: `/generated/${fileName}`,
+        width: 1200,
+        height: 300
+      },
+      url: `/generated/${fileName}`
+    });
+  } catch (error) {
+    console.error("Erreur generate-plaque-base :", error);
+    return res.status(500).json({
+      error: "Erreur lors de la génération de l'overlay.",
+      details: error.message || "Erreur inconnue"
+    });
+  }
+});
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
 });
