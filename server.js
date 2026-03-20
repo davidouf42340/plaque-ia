@@ -22,63 +22,52 @@ if (!fs.existsSync(GENERATED_DIR)) {
 
 app.use("/generated", express.static(GENERATED_DIR));
 
-function buildPrompt({ engravingColor, leftIcon, rightIcon }) {
+const CANVAS_WIDTH = 1200;
+const CANVAS_HEIGHT = 300;
+const QUARTER_WIDTH = Math.round(CANVAS_WIDTH * 0.25);
+const MARGIN_X = 24;
+const MARGIN_Y = 28;
+const ICON_MAX_WIDTH = QUARTER_WIDTH - (MARGIN_X * 2);
+const ICON_MAX_HEIGHT = CANVAS_HEIGHT - (MARGIN_Y * 2);
+
+function buildSingleLogoPrompt({ engravingColor, iconName }) {
   const color = engravingColor === "white" ? "white" : "black";
 
   return `
-Create a clean engraving overlay for a professional nameplate.
+Create a single isolated logo for an engraved nameplate.
 
 STRICT RULES:
-- transparent background ONLY
-- no plate
-- no rectangle
-- no border
-- no frame
+- transparent background only
+- one single icon only
 - no text
 - no letters
 - no words
-- no typography
-- no background pattern
-- no decoration in center
+- no border
+- no frame
+- no plate
+- no rectangle
+- no background
+- no scene
+- centered icon
+- simple engraving style
+- vector-like lines
+- clean professional look
 
-LAYOUT:
-- horizontal layout (4:1 ratio)
-- left icon must be fully on the LEFT side
-- right icon must be fully on the RIGHT side
-- center must remain COMPLETELY EMPTY
-- nothing allowed in the center area
-- do not center anything
-
-LEFT ICON:
-${leftIcon || "none"}
-
-RIGHT ICON:
-${rightIcon || "none"}
-
-STYLE:
-- minimal
-- engraving style
-- thin lines
-- clean vector
-- professional
-- balanced composition
+ICON:
+${iconName}
 
 COLOR:
-- use ONLY ${color}
-- everything else must be transparent
-
-IMPORTANT:
-- icons must be small
-- do not place anything in the center
-- keep wide empty space in the middle
+- use only ${color}
+- everything else transparent
 
 OUTPUT:
-- transparent PNG
-- left and/or right icons only
+- one isolated transparent PNG icon
 `.trim();
 }
 
-async function generateOverlayImage({ prompt, outputPath, width, height }) {
+async function generateSingleLogoBuffer({ engravingColor, iconName }) {
+  const prompt = buildSingleLogoPrompt({ engravingColor, iconName });
+
   const result = await openai.images.generate({
     model: "gpt-image-1",
     size: "1024x1024",
@@ -94,13 +83,26 @@ async function generateOverlayImage({ prompt, outputPath, width, height }) {
 
   const buffer = Buffer.from(b64, "base64");
 
-  await sharp(buffer)
-    .resize(width, height, {
+  return sharp(buffer)
+    .resize(ICON_MAX_WIDTH, ICON_MAX_HEIGHT, {
       fit: "contain",
       background: { r: 255, g: 255, b: 255, alpha: 0 }
     })
     .png()
-    .toFile(outputPath);
+    .toBuffer();
+}
+
+async function createTransparentCanvas() {
+  return sharp({
+    create: {
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .png()
+    .toBuffer();
 }
 
 app.post("/generate-plaque-base", async (req, res) => {
@@ -119,29 +121,61 @@ app.post("/generate-plaque-base", async (req, res) => {
       });
     }
 
-    const prompt = buildPrompt({
-      engravingColor,
-      leftIcon,
-      rightIcon
-    });
+    const composites = [];
+
+    if (leftIcon && leftIcon.trim()) {
+      const leftBuffer = await generateSingleLogoBuffer({
+        engravingColor,
+        iconName: leftIcon.trim()
+      });
+
+      const meta = await sharp(leftBuffer).metadata();
+      const leftX = Math.round((QUARTER_WIDTH - (meta.width || 0)) / 2);
+      const leftY = Math.round((CANVAS_HEIGHT - (meta.height || 0)) / 2);
+
+      composites.push({
+        input: leftBuffer,
+        left: Math.max(leftX, MARGIN_X),
+        top: Math.max(leftY, MARGIN_Y)
+      });
+    }
+
+    if (rightIcon && rightIcon.trim()) {
+      const rightBuffer = await generateSingleLogoBuffer({
+        engravingColor,
+        iconName: rightIcon.trim()
+      });
+
+      const meta = await sharp(rightBuffer).metadata();
+      const baseX = CANVAS_WIDTH - QUARTER_WIDTH;
+      const rightX = baseX + Math.round((QUARTER_WIDTH - (meta.width || 0)) / 2);
+      const rightY = Math.round((CANVAS_HEIGHT - (meta.height || 0)) / 2);
+
+      composites.push({
+        input: rightBuffer,
+        left: Math.min(rightX, CANVAS_WIDTH - (meta.width || 0) - MARGIN_X),
+        top: Math.max(rightY, MARGIN_Y)
+      });
+    }
+
+    const canvasBuffer = await createTransparentCanvas();
 
     const fileName = `${Date.now()}.png`;
     const outputPath = path.join(GENERATED_DIR, fileName);
 
-    await generateOverlayImage({
-      prompt,
-      outputPath,
-      width: 1200,
-      height: 300
-    });
+    await sharp(canvasBuffer)
+      .composite(composites)
+      .png()
+      .toFile(outputPath);
 
     return res.json({
       plateColor,
       engravingColor,
+      style,
       preview: {
         url: `/generated/${fileName}`,
-        width: 1200,
-        height: 300
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT
       },
       url: `/generated/${fileName}`
     });
