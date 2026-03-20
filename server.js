@@ -120,30 +120,27 @@ function buildPrompt({
   style
 }) {
   const overlayColorText =
-    engravingColor === "white"
-      ? "blanc pur"
-      : "noir profond";
+    engravingColor === "white" ? "blanc pur" : "noir profond";
 
   const leftText = leftIcon?.trim()
-    ? `- pictogramme à gauche : ${leftIcon.trim()}`
+    ? `- pictogramme à gauche uniquement : ${leftIcon.trim()}`
     : "- aucun pictogramme à gauche";
 
   const rightText = rightIcon?.trim()
-    ? `- pictogramme à droite : ${rightIcon.trim()}`
+    ? `- pictogramme à droite uniquement : ${rightIcon.trim()}`
     : "- aucun pictogramme à droite";
 
   const decorText = backgroundDecor?.trim()
-    ? `- décor léger de fond : ${backgroundDecor.trim()}`
+    ? `- décor léger très discret en arrière-plan : ${backgroundDecor.trim()}`
     : "- aucun décor de fond";
 
   return `
-Créer UNIQUEMENT un overlay décoratif pour une plaque personnalisée.
+Créer UNIQUEMENT un overlay décoratif pour une plaque personnalisée horizontale.
 
 IMPORTANT :
-- fond transparent
+- fond totalement transparent
 - aucun fond de plaque
 - aucun rectangle
-- aucun support
 - aucune matière
 - aucune plaque complète
 - aucun texte
@@ -152,28 +149,48 @@ IMPORTANT :
 - aucun mot
 - aucune typographie
 - aucune signature
-- aucune bordure parasite
-- aucun effet photo réaliste de scène
+- aucun élément important au centre
+- aucun chevauchement avec la zone de texte
+- pas de scène complexe
 
 Objectif :
 Créer uniquement des éléments graphiques décoratifs destinés à être superposés sur une plaque déjà affichée côté Shopify.
 
-Contraintes de composition :
+Composition OBLIGATOIRE :
 - format horizontal 4:1
-- composition propre, équilibrée, centrée
-- zones respirantes pour laisser la place au texte au centre
+- réserver impérativement une grande zone vide centrale pour le texte
+- la zone centrale doit rester propre, vide et lisible
+- ne rien placer d'important au centre
+- placer le pictogramme gauche uniquement dans le tiers gauche
+- placer le pictogramme droite uniquement dans le tiers droit
+- ne jamais faire chevaucher les pictogrammes avec la zone centrale
+- garder des marges propres sur les bords
+- composition équilibrée, sobre, premium
+
+Répartition visuelle stricte :
+- tiers gauche = pictogramme gauche seulement
+- tiers central = vide pour le texte
+- tiers droit = pictogramme droite seulement
+
+Style :
 - style : ${style}
 - rendu simple, net, lisible
 - décor discret et élégant
 - pas trop chargé
 - visuel exploitable pour gravure / découpe
-- icônes simples, vector-like, propres
+- icônes simples, propres, type vectoriel
 - traits clairs et lisibles
 
 Éléments demandés :
 ${leftText}
 ${rightText}
 ${decorText}
+
+Décor de fond :
+- le décor de fond doit être très léger
+- il peut traverser l'arrière-plan mais en intensité faible
+- il ne doit jamais gêner la lecture du texte central
+- éviter tout élément dense au centre
 
 Couleur obligatoire de l'overlay :
 - utiliser uniquement la couleur ${overlayColorText}
@@ -183,10 +200,11 @@ Couleur obligatoire de l'overlay :
 Contexte plaque choisi par le client :
 - couleur de plaque : ${plateColor}
 
-Le résultat final doit être :
+Résultat final obligatoire :
 - un PNG transparent
-- uniquement la décoration
-- propre pour être posé au-dessus d'une plaque personnalisée.
+- décoration seulement
+- gauche et droite bien séparés
+- centre vide.
 `.trim();
 }
 
