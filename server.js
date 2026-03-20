@@ -23,27 +23,22 @@ const openai = new OpenAI({
 const GENERATED_DIR = "generated";
 const PREVIEW_DIR = path.join(GENERATED_DIR, "previews");
 const PRODUCTION_DIR = path.join(GENERATED_DIR, "production");
-const PICTO_DIR = path.join(GENERATED_DIR, "pictos");
 const CREATIONS_FILE = "creations.json";
 
-for (const dir of [GENERATED_DIR, PREVIEW_DIR, PRODUCTION_DIR, PICTO_DIR]) {
+for (const dir of [GENERATED_DIR, PREVIEW_DIR, PRODUCTION_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
-if (!fs.existsSync(CREATIONS_FILE)) fs.writeFileSync(CREATIONS_FILE, "[]", "utf8");
+
+if (!fs.existsSync(CREATIONS_FILE)) {
+  fs.writeFileSync(CREATIONS_FILE, "[]", "utf8");
+}
 
 app.use("/generated", express.static(GENERATED_DIR));
 
-const MM_TO_PX_300DPI = 11.811;
-
-const VALID_MATERIALS = [
-  "noir",
-  "blanc",
-  "argent",
-  "or",
-  "or-rose",
-  "acrylique-noir",
-  "acrylique-blanc"
-];
+const PRODUCTION_WIDTH = 1600;
+const PRODUCTION_HEIGHT = 400;
+const PREVIEW_WIDTH = 1200;
+const PREVIEW_HEIGHT = 300;
 
 const VALID_STYLES = [
   "premium",
@@ -54,40 +49,13 @@ const VALID_STYLES = [
   "elegant"
 ];
 
-function mmToPx(mm) {
-  return Math.round(mm * MM_TO_PX_300DPI);
-}
-
-function getPlateSize(widthMm, heightMm) {
-  const prodWidth = mmToPx(widthMm);
-  const prodHeight = mmToPx(heightMm);
-
-  // Preview allégée mais fidèle aux proportions
-  const previewMaxWidth = 1400;
-  const ratio = previewMaxWidth / prodWidth;
-  const previewWidth = prodWidth > previewMaxWidth ? previewMaxWidth : prodWidth;
-  const previewHeight = prodWidth > previewMaxWidth
-    ? Math.round(prodHeight * ratio)
-    : prodHeight;
-
-  return {
-    production: {
-      width: prodWidth,
-      height: prodHeight
-    },
-    preview: {
-      width: previewWidth,
-      height: previewHeight
-    }
-  };
-}
-
 function sanitizeFilename(value) {
   return String(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9-_]/g, "-")
     .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
     .toLowerCase();
 }
 
@@ -98,42 +66,136 @@ function saveCreation(entry) {
   fs.writeFileSync(CREATIONS_FILE, JSON.stringify(creations, null, 2), "utf8");
 }
 
-function buildPrompt({ material, style, pictos, clientPrompt, widthMm, heightMm }) {
-  return `
-Créer uniquement le visuel de fond d'une plaque gravée personnalisable.
-IMPORTANT :
-- Aucun texte
-- Aucune lettre
-- Aucun chiffre
-- Aucun mot
-- Aucun nom
-- Aucun logo typographique
-- Pas de mise en page texte
-- Seulement la base graphique de la plaque
+function normalizePlateColor(value = "") {
+  const color = String(value).trim().toLowerCase();
 
-Contraintes visuelles :
-- plaque horizontale
-- proportions exactes : ${widthMm} mm x ${heightMm} mm
-- matière/couleur dominante : ${material}
-- style : ${style}
-- rendu propre, net, professionnel
-- adapté à une future superposition de texte par-dessus
-- laisser des zones respirantes pour que du texte puisse être ajouté ensuite
-- intégrer si pertinent des pictogrammes décoratifs en lien avec : ${pictos || "aucun"}
-- style client : ${clientPrompt || "sobre et premium"}
+  if (color.includes("acier")) return "acier brossé";
+  if (color.includes("cuivre")) return "cuivre";
+  if (color.includes("or")) return "or brossé";
+  if (color.includes("blanc")) return "blanc";
+  if (color.includes("rose")) return "rose";
+  if (color.includes("noyer")) return "noyer";
+  if (color.includes("gris")) return "gris";
+  if (color.includes("noir brillant")) return "noir brillant";
+  if (color.includes("noir")) return "noir";
 
-Spécificités :
-- visuel léger et exploitable en configurateur
-- fond propre
-- contraste suffisant
-- composition centrée
-- pas d'effet trop chargé
-- look réaliste de plaque gravée / découpée
-- destiné à une boutique de plaques personnalisées
-`;
+  return color || "blanc";
 }
 
-async function generateBaseVisual(prompt, outputPngPath, width, height) {
+function resolveEngravingColor(plateColor, engravingColor) {
+  const normalizedPlateColor = normalizePlateColor(plateColor);
+  const requested = String(engravingColor || "").trim().toLowerCase();
+
+  if (requested === "black" || requested === "white") {
+    return requested;
+  }
+
+  const blackEngraving = [
+    "acier brossé",
+    "cuivre",
+    "or brossé",
+    "blanc"
+  ];
+
+  const whiteEngraving = [
+    "rose",
+    "noyer",
+    "gris",
+    "noir",
+    "noir brillant"
+  ];
+
+  if (blackEngraving.includes(normalizedPlateColor)) return "black";
+  if (whiteEngraving.includes(normalizedPlateColor)) return "white";
+
+  return "black";
+}
+
+function buildPrompt({
+  plateColor,
+  engravingColor,
+  leftIcon,
+  rightIcon,
+  backgroundDecor,
+  style
+}) {
+  const overlayColorText =
+    engravingColor === "white"
+      ? "blanc pur"
+      : "noir profond";
+
+  const leftText = leftIcon?.trim()
+    ? `- pictogramme à gauche : ${leftIcon.trim()}`
+    : "- aucun pictogramme à gauche";
+
+  const rightText = rightIcon?.trim()
+    ? `- pictogramme à droite : ${rightIcon.trim()}`
+    : "- aucun pictogramme à droite";
+
+  const decorText = backgroundDecor?.trim()
+    ? `- décor léger de fond : ${backgroundDecor.trim()}`
+    : "- aucun décor de fond";
+
+  return `
+Créer UNIQUEMENT un overlay décoratif pour une plaque personnalisée.
+
+IMPORTANT :
+- fond transparent
+- aucun fond de plaque
+- aucun rectangle
+- aucun support
+- aucune matière
+- aucune plaque complète
+- aucun texte
+- aucune lettre
+- aucun chiffre
+- aucun mot
+- aucune typographie
+- aucune signature
+- aucune bordure parasite
+- aucun effet photo réaliste de scène
+
+Objectif :
+Créer uniquement des éléments graphiques décoratifs destinés à être superposés sur une plaque déjà affichée côté Shopify.
+
+Contraintes de composition :
+- format horizontal 4:1
+- composition propre, équilibrée, centrée
+- zones respirantes pour laisser la place au texte au centre
+- style : ${style}
+- rendu simple, net, lisible
+- décor discret et élégant
+- pas trop chargé
+- visuel exploitable pour gravure / découpe
+- icônes simples, vector-like, propres
+- traits clairs et lisibles
+
+Éléments demandés :
+${leftText}
+${rightText}
+${decorText}
+
+Couleur obligatoire de l'overlay :
+- utiliser uniquement la couleur ${overlayColorText}
+- tout le graphisme doit être en ${overlayColorText}
+- le reste totalement transparent
+
+Contexte plaque choisi par le client :
+- couleur de plaque : ${plateColor}
+
+Le résultat final doit être :
+- un PNG transparent
+- uniquement la décoration
+- propre pour être posé au-dessus d'une plaque personnalisée.
+`.trim();
+}
+
+async function generateOverlayImage({
+  prompt,
+  outputPath,
+  width,
+  height
+}) {
   const result = await openai.images.generate({
     model: "gpt-image-1",
     size: "1536x1024",
@@ -147,87 +209,93 @@ async function generateBaseVisual(prompt, outputPngPath, width, height) {
 
   const buffer = Buffer.from(b64, "base64");
 
-  // On adapte ensuite exactement à la taille finale
   await sharp(buffer)
     .resize(width, height, {
-      fit: "cover",
-      position: "centre"
+      fit: "contain",
+      background: { r: 255, g: 255, b: 255, alpha: 0 }
     })
     .png()
-    .toFile(outputPngPath);
+    .toFile(outputPath);
 }
 
 app.post("/generate-plaque-base", async (req, res) => {
   try {
     const {
-      widthMm,
-      heightMm,
-      material,
-      style,
-      pictos,
-      clientPrompt
+      plateColor,
+      engravingColor,
+      leftIcon = "",
+      rightIcon = "",
+      backgroundDecor = "",
+      style = "premium"
     } = req.body;
 
-    if (!widthMm || !heightMm) {
-      return res.status(400).json({ error: "widthMm et heightMm sont obligatoires." });
-    }
-
-    if (!VALID_MATERIALS.includes(material)) {
-      return res.status(400).json({ error: "Matériau/couleur invalide." });
+    if (!plateColor) {
+      return res.status(400).json({
+        error: "plateColor est obligatoire."
+      });
     }
 
     if (!VALID_STYLES.includes(style)) {
-      return res.status(400).json({ error: "Style invalide." });
+      return res.status(400).json({
+        error: "Style invalide."
+      });
     }
 
-    const sizes = getPlateSize(widthMm, heightMm);
-    const uid = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const slug = sanitizeFilename(`${material}-${style}-${widthMm}x${heightMm}-${uid}`);
-
-    const productionPngPath = path.join(PRODUCTION_DIR, `${slug}.png`);
-    const previewWebpPath = path.join(PREVIEW_DIR, `${slug}.webp`);
-
-    const prompt = buildPrompt({
-      material,
-      style,
-      pictos,
-      clientPrompt,
-      widthMm,
-      heightMm
-    });
-
-    await generateBaseVisual(
-      prompt,
-      productionPngPath,
-      sizes.production.width,
-      sizes.production.height
+    const normalizedPlateColor = normalizePlateColor(plateColor);
+    const finalEngravingColor = resolveEngravingColor(
+      normalizedPlateColor,
+      engravingColor
     );
 
-    await sharp(productionPngPath)
-      .resize(sizes.preview.width, sizes.preview.height, {
+    const uid = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const slug = sanitizeFilename(
+      `${normalizedPlateColor}-${finalEngravingColor}-${style}-${uid}`
+    );
+
+    const productionPath = path.join(PRODUCTION_DIR, `${slug}.png`);
+    const previewPath = path.join(PREVIEW_DIR, `${slug}.png`);
+
+    const prompt = buildPrompt({
+      plateColor: normalizedPlateColor,
+      engravingColor: finalEngravingColor,
+      leftIcon,
+      rightIcon,
+      backgroundDecor,
+      style
+    });
+
+    await generateOverlayImage({
+      prompt,
+      outputPath: productionPath,
+      width: PRODUCTION_WIDTH,
+      height: PRODUCTION_HEIGHT
+    });
+
+    await sharp(productionPath)
+      .resize(PREVIEW_WIDTH, PREVIEW_HEIGHT, {
         fit: "contain",
         background: { r: 255, g: 255, b: 255, alpha: 0 }
       })
-      .webp({ quality: 82 })
-      .toFile(previewWebpPath);
+      .png()
+      .toFile(previewPath);
 
     const payload = {
       id: uid,
-      widthMm,
-      heightMm,
-      material,
+      plateColor: normalizedPlateColor,
+      engravingColor: finalEngravingColor,
+      leftIcon,
+      rightIcon,
+      backgroundDecor,
       style,
-      pictos,
-      clientPrompt,
+      preview: {
+        url: `/generated/previews/${slug}.png`,
+        width: PREVIEW_WIDTH,
+        height: PREVIEW_HEIGHT
+      },
       production: {
         url: `/generated/production/${slug}.png`,
-        width: sizes.production.width,
-        height: sizes.production.height
-      },
-      preview: {
-        url: `/generated/previews/${slug}.webp`,
-        width: sizes.preview.width,
-        height: sizes.preview.height
+        width: PRODUCTION_WIDTH,
+        height: PRODUCTION_HEIGHT
       },
       createdAt: new Date().toISOString()
     };
@@ -236,9 +304,9 @@ app.post("/generate-plaque-base", async (req, res) => {
 
     return res.json(payload);
   } catch (error) {
-    console.error("Erreur generate-plaque-base:", error);
+    console.error("Erreur generate-plaque-base :", error);
     return res.status(500).json({
-      error: "Erreur lors de la génération de la base de plaque.",
+      error: "Erreur lors de la génération de l'overlay.",
       details: error.message
     });
   }
@@ -249,6 +317,7 @@ app.get("/health", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`Serveur lancé sur le port ${PORT}`);
 });
