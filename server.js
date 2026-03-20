@@ -89,28 +89,39 @@ FINAL RESULT:
 }
 
 async function generateOverlayImage({ prompt, outputPath, width, height }) {
-  const result = await openai.images.generate({
-    model: "gpt-image-1",
-    size: "1024x1024",
-    prompt
-  });
+  try {
+    console.log("OPENAI KEY PRESENT:", !!process.env.OPENAI_API_KEY);
+    console.log("PROMPT START");
+    console.log(prompt);
+    console.log("PROMPT END");
 
-  const b64 = result?.data?.[0]?.b64_json;
+    const result = await openai.images.generate({
+      model: "gpt-image-1",
+      size: "1024x1024",
+      prompt
+    });
 
-  if (!b64) {
-    console.error("Réponse OpenAI inattendue :", JSON.stringify(result, null, 2));
-    throw new Error("Image vide retournée par OpenAI.");
+    const b64 = result?.data?.[0]?.b64_json;
+
+    if (!b64) {
+      console.error("Réponse OpenAI inattendue :", JSON.stringify(result, null, 2));
+      throw new Error("Image vide retournée par OpenAI.");
+    }
+
+    const buffer = Buffer.from(b64, "base64");
+
+    await sharp(buffer)
+      .resize(width, height, {
+        fit: "contain",
+        background: { r: 255, g: 255, b: 255, alpha: 0 }
+      })
+      .png()
+      .toFile(outputPath);
+
+  } catch (error) {
+    console.error("Erreur generateOverlayImage :", error);
+    throw error;
   }
-
-  const buffer = Buffer.from(b64, "base64");
-
-  await sharp(buffer)
-    .resize(width, height, {
-      fit: "contain",
-      background: { r: 255, g: 255, b: 255, alpha: 0 }
-    })
-    .png()
-    .toFile(outputPath);
 }
 
 app.post("/generate-plaque-base", async (req, res) => {
@@ -123,6 +134,8 @@ app.post("/generate-plaque-base", async (req, res) => {
       backgroundDecor = "",
       style = "premium"
     } = req.body;
+
+    console.log("BODY RECU :", req.body);
 
     if (!plateColor) {
       return res.status(400).json({
@@ -159,10 +172,15 @@ app.post("/generate-plaque-base", async (req, res) => {
       url: `/generated/${fileName}`
     });
   } catch (error) {
-    console.error("Erreur generate-plaque-base :", error);
+    console.error("❌ ERREUR SERVEUR COMPLETE:");
+    console.error(error);
+
     return res.status(500).json({
       error: "Erreur lors de la génération de l'overlay.",
-      details: error.message || "Erreur inconnue"
+      details:
+        error?.response?.data?.error?.message ||
+        error?.message ||
+        "Erreur inconnue"
     });
   }
 });
