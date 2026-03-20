@@ -7,13 +7,7 @@ import { OpenAI } from "openai";
 
 const app = express();
 
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-
-app.options("*", cors());
+app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 
 const openai = new OpenAI({
@@ -21,13 +15,44 @@ const openai = new OpenAI({
 });
 
 const GENERATED_DIR = "generated";
-const PREVIEW_DIR = path.join(GENERATED_DIR, "previews");
-const PRODUCTION_DIR = path.join(GENERATED_DIR, "production");
-const CREATIONS_FILE = "creations.json";
 
-for (const dir of [GENERATED_DIR, PREVIEW_DIR, PRODUCTION_DIR]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+if (!fs.existsSync(GENERATED_DIR)) {
+  fs.mkdirSync(GENERATED_DIR);
 }
 
-if (!fs.existsSync(CREATIONS_FILE)) {
-  fs.writeFileSync(CREATIONS_FILE, "[]", "
+app.use("/generated", express.static(GENERATED_DIR));
+
+app.post("/generate-plaque-base", async (req, res) => {
+  try {
+    const {
+      plateColor,
+      engravingColor,
+      leftIcon,
+      rightIcon
+    } = req.body;
+
+    console.log("REQ OK");
+
+    const result = await openai.images.generate({
+      model: "gpt-image-1",
+      size: "1024x1024",
+      prompt: "simple minimal icon left and right, empty center, transparent background"
+    });
+
+    const b64 = result.data[0].b64_json;
+    const buffer = Buffer.from(b64, "base64");
+
+    const fileName = Date.now() + ".png";
+    const filePath = path.join(GENERATED_DIR, fileName);
+
+    await sharp(buffer)
+      .resize(1200, 300)
+      .png()
+      .toFile(filePath);
+
+    res.json({
+      url: "/generated/" + fileName
+    });
+
+  } catch (err) {
+    console.error
