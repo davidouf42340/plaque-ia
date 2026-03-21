@@ -22,106 +22,56 @@ if (!fs.existsSync(GENERATED_DIR)) {
 
 app.use("/generated", express.static(GENERATED_DIR));
 
-const WIDTH = 1600;
-const HEIGHT = 400;
+const PREVIEW_WIDTH = 1200;
+const PREVIEW_HEIGHT = 300;
 
-const LEFT_ZONE = WIDTH * 0.25;
-const RIGHT_ZONE = WIDTH * 0.25;
+const PRODUCTION_WIDTH = 1600;
+const PRODUCTION_HEIGHT = 400;
 
-async function generateLogo(icon, color) {
-  if (!icon) return null;
+const PREVIEW_QUARTER = Math.round(PREVIEW_WIDTH * 0.25);
+const PRODUCTION_QUARTER = Math.round(PRODUCTION_WIDTH * 0.25);
 
-  const result = await openai.images.generate({
-    model: "gpt-image-1",
-    size: "1024x1024",
-    prompt: `
-clean engraved icon
-transparent background
-no text
-no frame
-simple vector style
-icon: ${icon}
-color: ${color}
-`
-  });
+const PREVIEW_MARGIN_X = 24;
+const PREVIEW_MARGIN_Y = 28;
 
-  const buffer = Buffer.from(result.data[0].b64_json, "base64");
+const PRODUCTION_MARGIN_X = 32;
+const PRODUCTION_MARGIN_Y = 36;
 
-  return sharp(buffer)
-    .resize(300, 300, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .png()
-    .toBuffer();
-}
+const PREVIEW_ICON_MAX_WIDTH = PREVIEW_QUARTER - PREVIEW_MARGIN_X * 2;
+const PREVIEW_ICON_MAX_HEIGHT = PREVIEW_HEIGHT - PREVIEW_MARGIN_Y * 2;
 
-app.post("/generate-production", async (req, res) => {
-  try {
-    const {
-      leftIcon,
-      rightIcon,
-      engravingColor = "black"
-    } = req.body;
+const PRODUCTION_ICON_MAX_WIDTH = PRODUCTION_QUARTER - PRODUCTION_MARGIN_X * 2;
+const PRODUCTION_ICON_MAX_HEIGHT = PRODUCTION_HEIGHT - PRODUCTION_MARGIN_Y * 2;
 
-    const composites = [];
+function buildSingleLogoPrompt({ engravingColor, iconName }) {
+  const color = engravingColor === "white" ? "white" : "black";
 
-    const leftLogo = await generateLogo(leftIcon, engravingColor);
-    const rightLogo = await generateLogo(rightIcon, engravingColor);
+  return `
+Create a single isolated logo for an engraved nameplate.
 
-    if (leftLogo) {
-      composites.push({
-        input: leftLogo,
-        left: 100,
-        top: 50
-      });
-    }
+STRICT RULES:
+- transparent background only
+- one single icon only
+- no text
+- no letters
+- no words
+- no border
+- no frame
+- no plate
+- no rectangle
+- no background
+- no scene
+- centered icon
+- simple engraving style
+- vector-like lines
+- clean professional look
 
-    if (rightLogo) {
-      composites.push({
-        input: rightLogo,
-        left: WIDTH - 350,
-        top: 50
-      });
-    }
+ICON:
+${iconName}
 
-    const canvas = await sharp({
-      create: {
-        width: WIDTH,
-        height: HEIGHT,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 }
-      }
-    })
-      .composite(composites)
-      .png()
-      .toBuffer();
+COLOR:
+- use only ${color}
+- everything else transparent
 
-    const filename = `${Date.now()}.png`;
-    const filepath = path.join(GENERATED_DIR, filename);
-
-    await fs.promises.writeFile(filepath, canvas);
-
-    res.json({
-      url: `/generated/${filename}`
-    });
-
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "production error" });
-  }
-});
-
-app.post("/upload-preview", async (req, res) => {
-  const { image } = req.body;
-
-  const buffer = Buffer.from(image.split(",")[1], "base64");
-
-  const filename = `${Date.now()}-preview.png`;
-  const filepath = path.join(GENERATED_DIR, filename);
-
-  await fs.promises.writeFile(filepath, buffer);
-
-  res.json({
-    url: `/generated/${filename}`
-  });
-});
-
-app.listen(3000, () => console.log("Server OK"));
+OUTPUT:
+- one isolated transparent PNG
