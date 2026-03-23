@@ -297,4 +297,152 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       size: "1024x1024",
       background: "transparent",
       output_format: "png",
-      quality: "
+      quality: "medium",
+      n: imageCount
+    });
+
+    const logos = [];
+
+    for (let i = 0; i < (result.data || []).length; i += 1) {
+      const item = result.data[i];
+      if (!item.b64_json) continue;
+
+      const fileBase = `${Date.now()}-${slugify(cleanPrompt)}-${i + 1}`;
+      const fileName = `${fileBase}.png`;
+      const filePath = path.join(logosDir, fileName);
+
+      fs.writeFileSync(filePath, Buffer.from(item.b64_json, "base64"));
+
+      logos.push({
+        id: fileBase,
+        url: `${baseUrl}/generated/logos/${fileName}`
+      });
+    }
+
+    return res.json({ logos });
+  } catch (error) {
+    console.error("Erreur /api/logos/search-or-generate :", error);
+    return res.status(500).json({
+      error: error?.message || "Erreur interne génération logos."
+    });
+  }
+});
+
+app.post("/api/render/preview", async (req, res) => {
+  try {
+    const {
+      line1 = "",
+      line2 = "",
+      line3 = "",
+      leftLogoUrl = null,
+      rightLogoUrl = null,
+      dimension = "100x25"
+    } = req.body || {};
+
+    const baseUrl = getBaseUrl(req);
+    const previews = [];
+
+    for (const [colorKey, bgUrl] of Object.entries(PLATE_BACKGROUNDS)) {
+      const composedBuffer = await buildComposite({
+        backgroundUrl: bgUrl,
+        dimension,
+        line1,
+        line2,
+        line3,
+        leftLogoUrl,
+        rightLogoUrl,
+        textFill: "#111111",
+        output: "preview"
+      });
+
+      const fileName = `${Date.now()}-${slugify(colorKey)}-${Math.random().toString(36).slice(2, 8)}.png`;
+      const filePath = path.join(previewsDir, fileName);
+
+      fs.writeFileSync(filePath, composedBuffer);
+
+      previews.push({
+        color: colorKey,
+        url: `${baseUrl}/generated/previews/${fileName}`
+      });
+    }
+
+    return res.json({ previews });
+  } catch (error) {
+    console.error("Erreur /api/render/preview :", error);
+    return res.status(500).json({
+      error: error?.message || "Erreur interne génération aperçu."
+    });
+  }
+});
+
+app.post("/api/render/production", async (req, res) => {
+  try {
+    const {
+      line1 = "",
+      line2 = "",
+      line3 = "",
+      dimension = "100x25",
+      leftLogoUrl = null,
+      rightLogoUrl = null
+    } = req.body || {};
+
+    const baseUrl = getBaseUrl(req);
+
+    const productionBuffer = await buildComposite({
+      backgroundUrl: null,
+      dimension,
+      line1,
+      line2,
+      line3,
+      leftLogoUrl,
+      rightLogoUrl,
+      textFill: "#111111",
+      output: "production"
+    });
+
+    const fileName = `${Date.now()}-production-${Math.random().toString(36).slice(2, 8)}.png`;
+    const filePath = path.join(productionDir, fileName);
+
+    fs.writeFileSync(filePath, productionBuffer);
+
+    return res.json({
+      url: `${baseUrl}/generated/production/${fileName}`
+    });
+  } catch (error) {
+    console.error("Erreur /api/render/production :", error);
+    return res.status(500).json({
+      error: error?.message || "Erreur interne génération production."
+    });
+  }
+});
+
+app.post("/api/variant/resolve", async (req, res) => {
+  try {
+    const { dimension, thickness } = req.body || {};
+
+    if (!dimension || !thickness) {
+      return res.status(400).json({
+        error: "Dimension ou épaisseur manquante."
+      });
+    }
+
+    const found = VARIANT_MAP?.[dimension]?.[thickness];
+
+    if (!found) {
+      return res.status(404).json({
+        error: "Variant introuvable pour cette dimension / épaisseur."
+      });
+    }
+
+    return res.json(found);
+  } catch (error) {
+    console.error("Erreur /api/variant/resolve :", error);
+    return res.status(500).json({
+      error: "Erreur interne variant."
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
