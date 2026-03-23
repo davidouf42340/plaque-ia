@@ -66,10 +66,7 @@ function escapeXml(str = "") {
 }
 
 function normalizeDimension(value = "") {
-  return String(value)
-    .trim()
-    .toLowerCase()
-    .replaceAll(" ", "");
+  return String(value).trim().toLowerCase().replaceAll(" ", "");
 }
 
 function normalizeThickness(value = "") {
@@ -346,7 +343,6 @@ async function fetchImageBuffer(url) {
 async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
   const { r, g, b } = hexToRgb(colorHex);
 
-  // 1) On nettoie et redimensionne le logo
   const resizedBuffer = await sharp(buffer)
     .ensureAlpha()
     .trim()
@@ -364,13 +360,11 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
   const logoW = meta.width || boxWidth;
   const logoH = meta.height || boxHeight;
 
-  // 2) On récupère l’alpha réel du logo
   const alpha = await sharp(resizedBuffer)
     .ensureAlpha()
     .extractChannel("alpha")
     .toBuffer();
 
-  // 3) On recrée un logo coloré exact à la taille du logo
   const coloredLogo = await sharp({
     create: {
       width: logoW,
@@ -383,7 +377,6 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
     .png()
     .toBuffer();
 
-  // 4) On place ce logo dans un canvas transparent FIXE de la taille de la box
   const left = Math.max(0, Math.round((boxWidth - logoW) / 2));
   const top = Math.max(0, Math.round((boxHeight - logoH) / 2));
 
@@ -402,41 +395,6 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
         top
       }
     ])
-    .png()
-    .toBuffer();
-};
-
-  const trimmed = sharp(buffer)
-    .ensureAlpha()
-    .trim()
-    .resize({
-      width: boxWidth,
-      height: boxHeight,
-      fit: "contain",
-      withoutEnlargement: true,
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    });
-
-  const resizedMeta = await trimmed.metadata();
-  const logoW = resizedMeta.width || boxWidth;
-  const logoH = resizedMeta.height || boxHeight;
-
-  const logoBuffer = await trimmed.png().toBuffer();
-
-  const alpha = await sharp(logoBuffer)
-    .ensureAlpha()
-    .extractChannel("alpha")
-    .toBuffer();
-
-  return sharp({
-    create: {
-      width: logoW,
-      height: logoH,
-      channels: 3,
-      background: { r, g, b }
-    }
-  })
-    .joinChannel(alpha)
     .png()
     .toBuffer();
 }
@@ -474,12 +432,10 @@ async function buildComposite({
   const hasLeft = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
 
-  // zone logo
   const logoBoxWidth = Math.round(width * 0.25);
   const logoBoxHeight = Math.round(height * 0.76);
   const sideMargin = Math.round(width * 0.02);
 
-  // zone texte
   const textZoneLeft = hasLeft ? Math.round(width * 0.26) : Math.round(width * 0.05);
   const textZoneRight = hasRight ? Math.round(width * 0.26) : Math.round(width * 0.05);
   const textZoneWidth = width - textZoneLeft - textZoneRight;
@@ -513,78 +469,6 @@ async function buildComposite({
       input: preparedRightLogo,
       left: width - logoBoxWidth - sideMargin,
       top: Math.round((height - logoBoxHeight) / 2)
-    });
-  }
-
-  const textSvg = buildTextSvg({
-    width: textZoneWidth,
-    height,
-    line1,
-    line2,
-    line3,
-    fill: foreground
-  });
-
-  composites.push({
-    input: textSvg,
-    left: textZoneLeft,
-    top: 0
-  });
-
-  return base.composite(composites).png().toBuffer();
-}) {
-  const { width, height } = getCanvasSize(dimension);
-
-  let base;
-
-  if (backgroundUrl) {
-    const bgBuffer = await fetchImageBuffer(backgroundUrl);
-    base = sharp(bgBuffer).resize(width, height, { fit: "fill" });
-  } else {
-    base = sharp({
-      create: {
-        width,
-        height,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 }
-      }
-    });
-  }
-
-  const composites = [];
-
-  const hasLeft = !!leftLogoUrl;
-  const hasRight = !!rightLogoUrl;
-
-  const logoBoxWidth = Math.round(width * 0.25);
-  const logoBoxHeight = Math.round(height * 0.76);
-  const sideMargin = Math.round(width * 0.02);
-
-  const textZoneLeft = hasLeft ? Math.round(width * 0.26) : Math.round(width * 0.05);
-  const textZoneRight = hasRight ? Math.round(width * 0.26) : Math.round(width * 0.05);
-  const textZoneWidth = width - textZoneLeft - textZoneRight;
-
-  if (leftLogoUrl) {
-    const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
-    const logoMeta = await sharp(preparedLeftLogo).metadata();
-
-    composites.push({
-      input: preparedLeftLogo,
-      left: sideMargin,
-      top: Math.round((height - (logoMeta.height || logoBoxHeight)) / 2)
-    });
-  }
-
-  if (rightLogoUrl) {
-    const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
-    const logoMeta = await sharp(preparedRightLogo).metadata();
-
-    composites.push({
-      input: preparedRightLogo,
-      left: width - (logoMeta.width || logoBoxWidth) - sideMargin,
-      top: Math.round((height - (logoMeta.height || logoBoxHeight)) / 2)
     });
   }
 
