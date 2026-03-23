@@ -9,11 +9,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
 app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "20mb" }));
 
 const PORT = process.env.PORT || 3000;
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -59,6 +59,12 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       });
     }
 
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL?.trim() ||
+      `${req.protocol}://${req.get("host")}`;
+
+    console.log("BASE URL UTILISÉE =", baseUrl);
+
     const finalPrompt = [
       "Créer un pictogramme/logo noir pour gravure laser.",
       "Fond totalement transparent.",
@@ -69,7 +75,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
     ].join(" ");
 
     const result = await openai.images.generate({
-      model: "gpt-image-1.5",
+      model: "gpt-image-1",
       prompt: finalPrompt,
       size: "1024x1024",
       background: "transparent",
@@ -92,9 +98,11 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 
       logos.push({
         id: fileBase,
-        url: `${PUBLIC_BASE_URL}/generated/logos/${fileName}`
+        url: `${baseUrl}/generated/logos/${fileName}`
       });
     }
+
+    console.log("LOGOS GENERATED =", logos);
 
     return res.json({ logos });
   } catch (error) {
@@ -157,8 +165,12 @@ app.post("/api/render/preview", async (req, res) => {
 
 app.post("/api/render/production", async (req, res) => {
   try {
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL?.trim() ||
+      `${req.protocol}://${req.get("host")}`;
+
     return res.json({
-      url: "https://placehold.co/1200x300/png?text=Fichier+Production+Transparent"
+      url: `${baseUrl}/generated/production-placeholder.png`
     });
   } catch (error) {
     console.error("Erreur /api/render/production :", error);
