@@ -112,15 +112,15 @@ function normalizeColor(value = "") {
  * Remplace par tes vraies URLs Shopify Files
  */
 const PLATE_BACKGROUNDS = {
-  "acier-brosse": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-acier-brosse.png",
-  "or": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-or.png",
-  "cuivre": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-cuivre.png",
-  "blanc": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-blanc.png",
-  "noir": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-noir.png",
-  "noir-brillant": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-noir-brillant.png",
-  "gris": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-gris.png",
-  "noyer": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-noyer.png",
-  "rose": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-rose.png"
+  "acier-brosse": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/acier-fd.png",
+  "or": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/or-fd.png",
+  "cuivre": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/cuivre-fd.png",
+  "blanc": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/blanc-fd.png",
+  "noir": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noir-fd.png",
+  "noir-brillant": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noirm-fd.png",
+  "gris": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/gris-fd.png",
+  "noyer": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noyer-fd.png",
+  "rose": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/rose-fd.png"
 };
 
 const FOREGROUND_BY_COLOR = {
