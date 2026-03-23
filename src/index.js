@@ -1,156 +1,155 @@
 import express from "express";
 import cors from "cors";
-import { nanoid } from "nanoid";
-import { config } from "./config.js";
-import { ensureDir } from "./lib/storage.js";
-import { normalizeLogoPrompt } from "./lib/normalize.js";
-import { findReusableLogos, getLogoById, incrementLogoUsage, storeGeneratedLogo } from "./lib/logoLibrary.js";
-import { generateLogosWithOpenAi } from "./lib/imageGenerator.js";
-import { renderPreviewSet, renderProductionFile } from "./lib/renderers.js";
-import { getVariantMap, resolveVariant } from "./lib/variantResolver.js";
 
 const app = express();
-app.use(cors({ origin: config.allowOrigin }));
+
+app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "20mb" }));
-app.use("/generated", express.static(config.paths.generated));
 
-[
-  config.paths.generated,
-  config.paths.logosPng,
-  config.paths.logosWebp,
-  config.paths.previews,
-  config.paths.production,
-  config.paths.sessions
-].forEach(ensureDir);
+const PORT = process.env.PORT || 3000;
 
-const sessions = new Map();
-
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "plaque-configurator-server" });
+/**
+ * Route de test
+ */
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    message: "Serveur configurateur plaque en ligne"
+  });
 });
 
-app.get("/api/variants", (_req, res) => {
-  res.json(getVariantMap());
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
 });
 
-app.post("/api/session/start", (req, res) => {
-  const sessionId = `cfg_${nanoid(12)}`;
-  const session = {
-    sessionId,
-    startedAt: new Date().toISOString(),
-    generationLocked: false,
-    generationDone: false,
-    selectedColor: null,
-    selectedVariant: null,
-    selectedDimension: null,
-    selectedThickness: null,
-    line1: "",
-    line2: "",
-    line3: "",
-    fontFamily: "Arial, sans-serif",
-    textSizes: { line1: 32, line2: 22, line3: 18 },
-    leftLogoScale: 1,
-    rightLogoScale: 1,
-    leftLogoId: null,
-    rightLogoId: null
-  };
-  sessions.set(sessionId, session);
-  res.json(session);
-});
-
-app.post("/api/logos/suggest", async (req, res) => {
+/**
+ * 1) Recherche / génération de logos
+ * Pour l'instant : version de test pour remettre tout en ligne
+ */
+app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
-    const { sessionId, prompt, count = 3 } = req.body || {};
-    const session = sessions.get(sessionId);
-    if (!session) return res.status(404).json({ error: "Session introuvable." });
-    if (session.generationLocked) return res.status(409).json({ error: "La génération est déjà verrouillée pour cette session." });
-    if (!prompt || !String(prompt).trim()) return res.status(400).json({ error: "Prompt logo manquant." });
+    const { prompt, count = 3 } = req.body || {};
 
-    const keywordMain = normalizeLogoPrompt(prompt);
-    const reusable = findReusableLogos(keywordMain, count);
-    const missingCount = Math.max(0, count - reusable.length);
-    const generated = [];
-
-    if (missingCount > 0) {
-      const pngBuffers = await generateLogosWithOpenAi({ prompt, count: missingCount });
-      for (const pngBuffer of pngBuffers) {
-        const logo = await storeGeneratedLogo({
-          keywordMain,
-          keywordsSecondary: [],
-          promptOriginal: prompt,
-          promptNormalized: keywordMain,
-          style: config.defaultLogoStyle,
-          pngBuffer
-        });
-        generated.push(logo);
-      }
+    if (!prompt || !String(prompt).trim()) {
+      return res.status(400).json({
+        error: "Prompt logo manquant."
+      });
     }
 
-    session.generationLocked = true;
-    session.generationDone = true;
-    sessions.set(sessionId, session);
+    const safePrompt = encodeURIComponent(String(prompt).trim());
 
-    res.json({
-      sessionId,
-      keywordMain,
-      reusedCount: reusable.length,
-      generatedCount: generated.length,
-      locked: true,
-      logos: [...reusable, ...generated].slice(0, count)
+    const logos = Array.from({ length: Number(count) || 3 }).map((_, i) => ({
+      id: `logo_${i + 1}`,
+      url: `https://placehold.co/600x240/png?text=${safePrompt}+${i + 1}`
+    }));
+
+    return res.json({ logos });
+  } catch (error) {
+    console.error("Erreur /api/logos/search-or-generate :", error);
+    return res.status(500).json({
+      error: "Erreur interne génération logos."
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message || "Erreur génération logos." });
   }
 });
 
-app.post("/api/session/update", (req, res) => {
-  const { sessionId, patch } = req.body || {};
-  const session = sessions.get(sessionId);
-  if (!session) return res.status(404).json({ error: "Session introuvable." });
-  Object.assign(session, patch || {});
-  sessions.set(sessionId, session);
-  res.json(session);
-});
-
-app.post("/api/render/previews", async (req, res) => {
+/**
+ * 2) Génération des aperçus couleur
+ * Version de test
+ */
+app.post("/api/render/preview", async (req, res) => {
   try {
-    const payload = req.body || {};
-    const previews = await renderPreviewSet(payload);
-    res.json({ previews });
+    const previews = [
+      {
+        color: "Noir",
+        url: "https://placehold.co/1200x300/000000/FFFFFF/png?text=Plaque+Noir"
+      },
+      {
+        color: "Or",
+        url: "https://placehold.co/1200x300/C9A227/000000/png?text=Plaque+Or"
+      },
+      {
+        color: "Argent",
+        url: "https://placehold.co/1200x300/C0C0C0/000000/png?text=Plaque+Argent"
+      },
+      {
+        color: "Blanc",
+        url: "https://placehold.co/1200x300/FFFFFF/000000/png?text=Plaque+Blanc"
+      },
+      {
+        color: "Rouge",
+        url: "https://placehold.co/1200x300/B22222/FFFFFF/png?text=Plaque+Rouge"
+      },
+      {
+        color: "Bleu",
+        url: "https://placehold.co/1200x300/1E3A8A/FFFFFF/png?text=Plaque+Bleu"
+      },
+      {
+        color: "Vert",
+        url: "https://placehold.co/1200x300/166534/FFFFFF/png?text=Plaque+Vert"
+      },
+      {
+        color: "Gris",
+        url: "https://placehold.co/1200x300/6B7280/FFFFFF/png?text=Plaque+Gris"
+      },
+      {
+        color: "Champagne",
+        url: "https://placehold.co/1200x300/D6C6A5/000000/png?text=Plaque+Champagne"
+      }
+    ];
+
+    return res.json({ previews });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message || "Erreur génération aperçus." });
+    console.error("Erreur /api/render/preview :", error);
+    return res.status(500).json({
+      error: "Erreur interne génération aperçu."
+    });
   }
 });
 
+/**
+ * 3) Génération du fichier production
+ * Version de test
+ */
 app.post("/api/render/production", async (req, res) => {
   try {
-    const payload = req.body || {};
-    const production = await renderProductionFile(payload);
-    if (payload.leftLogoId || payload.rightLogoId) {
-      incrementLogoUsage([payload.leftLogoId, payload.rightLogoId].filter(Boolean));
-    }
-    res.json({ production });
+    return res.json({
+      url: "https://placehold.co/1200x300/png?text=Fichier+Production+Transparent"
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message || "Erreur génération production." });
+    console.error("Erreur /api/render/production :", error);
+    return res.status(500).json({
+      error: "Erreur interne génération production."
+    });
   }
 });
 
-app.post("/api/variant/resolve", (req, res) => {
-  const { dimension, thickness } = req.body || {};
-  const variant = resolveVariant({ dimension, thickness });
-  if (!variant) return res.status(404).json({ error: "Variant introuvable." });
-  res.json({ variant });
+/**
+ * 4) Résolution du variant Shopify
+ * Version de test
+ */
+app.post("/api/variant/resolve", async (req, res) => {
+  try {
+    const { dimension, thickness } = req.body || {};
+
+    if (!dimension || !thickness) {
+      return res.status(400).json({
+        error: "Dimension ou épaisseur manquante."
+      });
+    }
+
+    return res.json({
+      variantId: 12345678901234,
+      price: "19.90",
+      priceFormatted: "19,90 €"
+    });
+  } catch (error) {
+    console.error("Erreur /api/variant/resolve :", error);
+    return res.status(500).json({
+      error: "Erreur interne variant."
+    });
+  }
 });
 
-app.get("/api/logo/:id", (req, res) => {
-  const logo = getLogoById(req.params.id);
-  if (!logo) return res.status(404).json({ error: "Logo introuvable." });
-  res.json({ logo });
-});
-
-app.listen(config.port, () => {
-  console.log(`Plaque configurator server running on ${config.appBaseUrl}`);
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
