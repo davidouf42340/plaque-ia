@@ -69,8 +69,7 @@ function normalizeDimension(value = "") {
   return String(value)
     .trim()
     .toLowerCase()
-    .replaceAll(" ", "")
-    .replaceAll("x", "x");
+    .replaceAll(" ", "");
 }
 
 function normalizeThickness(value = "") {
@@ -109,7 +108,7 @@ function normalizeColor(value = "") {
 }
 
 /**
- * Remplace par tes vraies URLs Shopify Files
+ * Tes vraies URLs Shopify Files
  */
 const PLATE_BACKGROUNDS = {
   "acier-brosse": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/acier-fd.png",
@@ -137,22 +136,18 @@ const FOREGROUND_BY_COLOR = {
 };
 
 /**
- * RÈGLE MÉTIER FINALE
  * 3.2 mm autorisé UNIQUEMENT pour :
- * - blanc
- * - noir
  * - acier-brosse
  * - or
  * - cuivre
+ * - blanc
+ * - noir
  *
- * 1.6 mm uniquement pour :
+ * 1.6 mm UNIQUEMENT pour :
  * - noir-brillant
  * - gris
  * - noyer
  * - rose
- *
- * Même si Shopify contient des variants 3.2 pour ces couleurs,
- * le configurateur les bloque volontairement ici.
  */
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse": ["1.6", "3.2"],
@@ -187,8 +182,8 @@ function getCanvasSize(dimension = "100x25mm") {
 }
 
 /**
- * VARIANT IDS SEULEMENT
- * Plus aucun prix ici.
+ * Variant IDs SEULEMENT
+ * Pas de prix ici
  */
 const VARIANT_MAP = {
   "100x25mm": {
@@ -309,27 +304,55 @@ function buildTextSvg({
   const safe2 = escapeXml(line2);
   const safe3 = escapeXml(line3);
 
-  const font1 = Math.round(height * 0.34);
-  const font2 = Math.round(height * 0.23);
-  const font3 = Math.round(height * 0.18);
+  const font1 = Math.round(height * 0.30);
+  const font2 = Math.round(height * 0.20);
+  const font3 = Math.round(height * 0.16);
 
   const x = Math.round(width / 2);
   const y1 = Math.round(height * 0.30);
-  const y2 = Math.round(height * 0.60);
-  const y3 = Math.round(height * 0.82);
+  const y2 = Math.round(height * 0.58);
+  const y3 = Math.round(height * 0.80);
 
   return Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <style>
-        .l1 { font: 700 ${font1}px Arial, sans-serif; fill: ${fill}; }
-        .l2 { font: 500 ${font2}px Arial, sans-serif; fill: ${fill}; }
-        .l3 { font: 500 ${font3}px Arial, sans-serif; fill: ${fill}; }
+        .l1 {
+          font-family: "DejaVu Sans", sans-serif;
+          font-weight: 700;
+          font-size: ${font1}px;
+          fill: ${fill};
+        }
+        .l2 {
+          font-family: "DejaVu Sans", sans-serif;
+          font-weight: 500;
+          font-size: ${font2}px;
+          fill: ${fill};
+        }
+        .l3 {
+          font-family: "DejaVu Sans", sans-serif;
+          font-weight: 500;
+          font-size: ${font3}px;
+          fill: ${fill};
+        }
       </style>
       ${safe1 ? `<text x="${x}" y="${y1}" text-anchor="middle" class="l1">${safe1}</text>` : ""}
       ${safe2 ? `<text x="${x}" y="${y2}" text-anchor="middle" class="l2">${safe2}</text>` : ""}
       ${safe3 ? `<text x="${x}" y="${y3}" text-anchor="middle" class="l3">${safe3}</text>` : ""}
     </svg>
   `);
+}
+
+function hexToRgb(hex = "#111111") {
+  const clean = hex.replace("#", "");
+  const full = clean.length === 3
+    ? clean.split("").map(c => c + c).join("")
+    : clean;
+
+  return {
+    r: parseInt(full.slice(0, 2), 16),
+    g: parseInt(full.slice(2, 4), 16),
+    b: parseInt(full.slice(4, 6), 16)
+  };
 }
 
 async function fetchImageBuffer(url) {
@@ -341,19 +364,34 @@ async function fetchImageBuffer(url) {
   return Buffer.from(arrayBuffer);
 }
 
-async function fitLogo(buffer, boxWidth, boxHeight, tintHex = null) {
-  let img = sharp(buffer).resize({
+async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
+  const { r, g, b } = hexToRgb(colorHex);
+
+  const resized = sharp(buffer).resize({
     width: boxWidth,
     height: boxHeight,
     fit: "contain",
     withoutEnlargement: true
   });
 
-  if (tintHex) {
-    img = img.tint(tintHex);
-  }
+  const alpha = await resized
+    .ensureAlpha()
+    .extractChannel("alpha")
+    .toBuffer();
 
-  return img.png().toBuffer();
+  const colored = await sharp({
+    create: {
+      width: boxWidth,
+      height: boxHeight,
+      channels: 4,
+      background: { r, g, b, alpha: 1 }
+    }
+  })
+    .joinChannel(alpha)
+    .png()
+    .toBuffer();
+
+  return colored;
 }
 
 async function buildComposite({
@@ -389,17 +427,23 @@ async function buildComposite({
   const hasLeft = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
 
-  const logoBoxWidth = Math.round(width * 0.16);
-  const logoBoxHeight = Math.round(height * 0.62);
-  const sideMargin = Math.round(width * 0.03);
+  // logo ≈ 25% de la largeur
+  const logoBoxWidth = Math.round(width * 0.25);
+  const logoBoxHeight = Math.round(height * 0.72);
+  const sideMargin = Math.round(width * 0.025);
 
-  const textZoneLeft = hasLeft ? Math.round(width * 0.17) : Math.round(width * 0.04);
-  const textZoneRight = hasRight ? Math.round(width * 0.17) : Math.round(width * 0.04);
+  const textZoneLeft = hasLeft ? Math.round(width * 0.24) : Math.round(width * 0.05);
+  const textZoneRight = hasRight ? Math.round(width * 0.24) : Math.round(width * 0.05);
   const textZoneWidth = width - textZoneLeft - textZoneRight;
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
+    const preparedLeftLogo = await fitLogo(
+      leftLogoBuffer,
+      logoBoxWidth,
+      logoBoxHeight,
+      foreground
+    );
 
     composites.push({
       input: preparedLeftLogo,
@@ -410,7 +454,12 @@ async function buildComposite({
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
+    const preparedRightLogo = await fitLogo(
+      rightLogoBuffer,
+      logoBoxWidth,
+      logoBoxHeight,
+      foreground
+    );
 
     composites.push({
       input: preparedRightLogo,
@@ -438,8 +487,8 @@ async function buildComposite({
 }
 
 /**
- * Génération logos
- * Toujours noirs + fond transparent
+ * 1. Logos IA
+ * Toujours noirs et transparents
  */
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
@@ -502,7 +551,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 });
 
 /**
- * Preview plaques
+ * 2. Preview plaques
  */
 app.post("/api/render/preview", async (req, res) => {
   try {
@@ -553,7 +602,7 @@ app.post("/api/render/preview", async (req, res) => {
 });
 
 /**
- * Fichier production atelier
+ * 3. Fichier production atelier
  * Transparent + noir
  */
 app.post("/api/render/production", async (req, res) => {
@@ -597,8 +646,7 @@ app.post("/api/render/production", async (req, res) => {
 });
 
 /**
- * Résolution variant
- * Pas de prix
+ * 4. Résolution variant
  * Retourne seulement le bon variantId
  */
 app.post("/api/variant/resolve", async (req, res) => {
