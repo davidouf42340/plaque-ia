@@ -13,8 +13,7 @@ app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "20mb" }));
 
 const PORT = process.env.PORT || 3000;
-const PUBLIC_BASE_URL =
-  process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
