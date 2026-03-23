@@ -1,0 +1,37 @@
+{
+  "productHandle": "plaque-personnalisee-ia",
+  "variants": [
+    {
+      "dimension": "100x25",
+      "thickness": "2.6",
+      "variantId": 11111111111111,
+      "price": 19.9,
+      "compareAtPrice": null,
+      "label": "100 x 25 mm / 2,6 mm"
+    },
+    {
+      "dimension": "100x25",
+      "thickness": "3.2",
+      "variantId": 11111111111112,
+      "price": 22.9,
+      "compareAtPrice": null,
+      "label": "100 x 25 mm / 3,2 mm"
+    },
+    {
+      "dimension": "150x50",
+      "thickness": "2.6",
+      "variantId": 11111111111113,
+      "price": 29.9,
+      "compareAtPrice": null,
+      "label": "150 x 50 mm / 2,6 mm"
+    },
+    {
+      "dimension": "150x50",
+      "thickness": "3.2",
+      "variantId": 11111111111114,
+      "price": 32.9,
+      "compareAtPrice": null,
+      "label": "150 x 50 mm / 3,2 mm"
+    }
+  ]
+}
