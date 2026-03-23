@@ -24,12 +24,10 @@ const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
 const previewsDir = path.join(generatedDir, "previews");
 const productionDir = path.join(generatedDir, "production");
-const tmpDir = path.join(generatedDir, "tmp");
 
 fs.mkdirSync(logosDir, { recursive: true });
 fs.mkdirSync(previewsDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
-fs.mkdirSync(tmpDir, { recursive: true });
 
 app.use("/generated", express.static(generatedDir));
 
@@ -44,6 +42,10 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
+function getBaseUrl(req) {
+  return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
+}
+
 function slugify(value) {
   return String(value || "")
     .normalize("NFD")
@@ -51,60 +53,7 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
-    .slice(0, 60);
-}
-
-function getBaseUrl(req) {
-  return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
-}
-
-/**
- * IMPORTANT :
- * Remplace ces URLs par TES vraies images Shopify Files
- */
-const PLATE_BACKGROUNDS = {
-  noir: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-noir.png",
-  or: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-or.png",
-  argent: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-argent.png",
-  blanc: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-blanc.png",
-  rouge: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-rouge.png",
-  bleu: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-bleu.png",
-  vert: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-vert.png",
-  gris: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-gris.png",
-  champagne: "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-champagne.png"
-};
-
-/**
- * Dimensions de travail / production
- * Adapte selon tes vrais gabarits
- */
-const DIMENSION_MAP = {
-  "100x25": { width: 1181, height: 295 },
-  "150x50": { width: 1772, height: 591 },
-  "200x50": { width: 2362, height: 591 }
-};
-
-/**
- * Variant map test
- * Remplace par tes vrais variants Shopify
- */
-const VARIANT_MAP = {
-  "100x25": {
-    "2.6": { variantId: 12345678901234, price: "19.90", priceFormatted: "19,90 €" },
-    "3.2": { variantId: 12345678901235, price: "21.90", priceFormatted: "21,90 €" }
-  },
-  "150x50": {
-    "2.6": { variantId: 12345678901236, price: "24.90", priceFormatted: "24,90 €" },
-    "3.2": { variantId: 12345678901237, price: "26.90", priceFormatted: "26,90 €" }
-  },
-  "200x50": {
-    "2.6": { variantId: 12345678901238, price: "29.90", priceFormatted: "29,90 €" },
-    "3.2": { variantId: 12345678901239, price: "31.90", priceFormatted: "31,90 €" }
-  }
-};
-
-function getCanvasSize(dimension = "100x25") {
-  return DIMENSION_MAP[dimension] || DIMENSION_MAP["100x25"];
+    .slice(0, 80);
 }
 
 function escapeXml(str = "") {
@@ -115,6 +64,137 @@ function escapeXml(str = "") {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
 }
+
+/**
+ * IMPORTANT
+ * Remplace chaque URL par ton vrai fichier Shopify Files
+ */
+const PLATE_BACKGROUNDS = {
+  "acier-brosse": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/acier-fd.png",
+  "or": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/or-fd.png"",
+  "cuivre": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/cuivre-fd.png",
+  "blanc": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/blanc-fd.png",
+  "noir": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noir-fd.png",
+  "noir-brillant": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noirm-fd.png",
+  "gris": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/gris-fd.png",
+  "noyer": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noyer-fd.png",
+  "rose": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/rose-fd.png"
+};
+
+/**
+ * Couleur texte/logo selon la plaque
+ */
+const FOREGROUND_BY_COLOR = {
+  "acier-brosse": "#111111",
+  "or": "#111111",
+  "cuivre": "#111111",
+  "blanc": "#111111",
+
+  "noir": "#FFFFFF",
+  "noir-brillant": "#FFFFFF",
+  "gris": "#FFFFFF",
+  "noyer": "#FFFFFF",
+  "rose": "#FFFFFF"
+};
+
+/**
+ * Couleurs disponibles par épaisseur
+ */
+const ALLOWED_THICKNESS_BY_COLOR = {
+  "acier-brosse": ["1.6", "3.2"],
+  "or": ["1.6", "3.2"],
+  "cuivre": ["1.6", "3.2"],
+  "blanc": ["1.6", "3.2"],
+  "noir": ["1.6", "3.2"],
+
+  "noir-brillant": ["1.6"],
+  "gris": ["1.6"],
+  "noyer": ["1.6"],
+  "rose": ["1.6"]
+};
+
+/**
+ * Gabarits
+ * Adapte si besoin à tes vraies tailles
+ */
+const DIMENSION_MAP = {
+  "100x25": { width: 1181, height: 295 },
+  "150x50": { width: 1772, height: 591 },
+  "200x50": { width: 2362, height: 591 }
+};
+
+function getCanvasSize(dimension = "100x25") {
+  return DIMENSION_MAP[dimension] || DIMENSION_MAP["100x25"];
+}
+
+/**
+ * Variant map
+ * À remplacer par tes vrais IDs Shopify
+ */
+const VARIANT_MAP = {
+  "100x25": {
+    "1.6": {
+      "acier-brosse": { variantId: 11111111111111, price: "19.90", priceFormatted: "19,90 €" },
+      "or": { variantId: 11111111111112, price: "19.90", priceFormatted: "19,90 €" },
+      "cuivre": { variantId: 11111111111113, price: "19.90", priceFormatted: "19,90 €" },
+      "blanc": { variantId: 11111111111114, price: "19.90", priceFormatted: "19,90 €" },
+      "noir": { variantId: 11111111111115, price: "19.90", priceFormatted: "19,90 €" },
+      "noir-brillant": { variantId: 11111111111116, price: "19.90", priceFormatted: "19,90 €" },
+      "gris": { variantId: 11111111111117, price: "19.90", priceFormatted: "19,90 €" },
+      "noyer": { variantId: 11111111111118, price: "19.90", priceFormatted: "19,90 €" },
+      "rose": { variantId: 11111111111119, price: "19.90", priceFormatted: "19,90 €" }
+    },
+    "3.2": {
+      "acier-brosse": { variantId: 11111111111121, price: "22.90", priceFormatted: "22,90 €" },
+      "or": { variantId: 11111111111122, price: "22.90", priceFormatted: "22,90 €" },
+      "cuivre": { variantId: 11111111111123, price: "22.90", priceFormatted: "22,90 €" },
+      "blanc": { variantId: 11111111111124, price: "22.90", priceFormatted: "22,90 €" },
+      "noir": { variantId: 11111111111125, price: "22.90", priceFormatted: "22,90 €" }
+    }
+  },
+
+  "150x50": {
+    "1.6": {
+      "acier-brosse": { variantId: 11111111111131, price: "24.90", priceFormatted: "24,90 €" },
+      "or": { variantId: 11111111111132, price: "24.90", priceFormatted: "24,90 €" },
+      "cuivre": { variantId: 11111111111133, price: "24.90", priceFormatted: "24,90 €" },
+      "blanc": { variantId: 11111111111134, price: "24.90", priceFormatted: "24,90 €" },
+      "noir": { variantId: 11111111111135, price: "24.90", priceFormatted: "24,90 €" },
+      "noir-brillant": { variantId: 11111111111136, price: "24.90", priceFormatted: "24,90 €" },
+      "gris": { variantId: 11111111111137, price: "24.90", priceFormatted: "24,90 €" },
+      "noyer": { variantId: 11111111111138, price: "24.90", priceFormatted: "24,90 €" },
+      "rose": { variantId: 11111111111139, price: "24.90", priceFormatted: "24,90 €" }
+    },
+    "3.2": {
+      "acier-brosse": { variantId: 11111111111141, price: "27.90", priceFormatted: "27,90 €" },
+      "or": { variantId: 11111111111142, price: "27.90", priceFormatted: "27,90 €" },
+      "cuivre": { variantId: 11111111111143, price: "27.90", priceFormatted: "27,90 €" },
+      "blanc": { variantId: 11111111111144, price: "27.90", priceFormatted: "27,90 €" },
+      "noir": { variantId: 11111111111145, price: "27.90", priceFormatted: "27,90 €" }
+    }
+  },
+
+  "200x50": {
+    "1.6": {
+      "acier-brosse": { variantId: 11111111111151, price: "29.90", priceFormatted: "29,90 €" },
+      "or": { variantId: 11111111111152, price: "29.90", priceFormatted: "29,90 €" },
+      "cuivre": { variantId: 11111111111153, price: "29.90", priceFormatted: "29,90 €" },
+      "blanc": { variantId: 11111111111154, price: "29.90", priceFormatted: "29,90 €" },
+      "noir": { variantId: 11111111111155, price: "29.90", priceFormatted: "29,90 €" },
+      "noir-brillant": { variantId: 11111111111156, price: "29.90", priceFormatted: "29,90 €" },
+      "gris": { variantId: 11111111111157, price: "29.90", priceFormatted: "29,90 €" },
+      "noyer": { variantId: 11111111111158, price: "29.90", priceFormatted: "29,90 €" },
+      "rose": { variantId: 11111111111159, price: "29.90", priceFormatted: "29,90 €" }
+    },
+    "3.2": {
+      "acier-brosse": { variantId: 11111111111161, price: "32.90", priceFormatted: "32,90 €" },
+      "or": { variantId: 11111111111162, price: "32.90", priceFormatted: "32,90 €" },
+      "cuivre": { variantId: 11111111111163, price: "32.90", priceFormatted: "32,90 €" },
+      "blanc": { variantId: 11111111111164, price: "32.90", priceFormatted: "32,90 €" },
+      "noir": { variantId: 11111111111165, price: "32.90", priceFormatted: "32,90 €" }
+    }
+  }
+};
 
 function buildTextSvg({
   width,
@@ -161,7 +241,7 @@ async function fetchImageBuffer(url) {
   return Buffer.from(arrayBuffer);
 }
 
-async function fitLogo(buffer, boxWidth, boxHeight, tint = null) {
+async function fitLogo(buffer, boxWidth, boxHeight, tintHex = null) {
   let img = sharp(buffer).resize({
     width: boxWidth,
     height: boxHeight,
@@ -169,8 +249,8 @@ async function fitLogo(buffer, boxWidth, boxHeight, tint = null) {
     withoutEnlargement: true
   });
 
-  if (tint) {
-    img = img.tint(tint);
+  if (tintHex) {
+    img = img.tint(tintHex);
   }
 
   return img.png().toBuffer();
@@ -184,8 +264,7 @@ async function buildComposite({
   line3 = "",
   leftLogoUrl = null,
   rightLogoUrl = null,
-  textFill = "#111111",
-  output = "preview"
+  foreground = "#111111"
 }) {
   const { width, height } = getCanvasSize(dimension);
 
@@ -220,12 +299,7 @@ async function buildComposite({
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(
-      leftLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      output === "production" ? "#111111" : null
-    );
+    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
 
     composites.push({
       input: preparedLeftLogo,
@@ -236,12 +310,7 @@ async function buildComposite({
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(
-      rightLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      output === "production" ? "#111111" : null
-    );
+    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
 
     composites.push({
       input: preparedRightLogo,
@@ -256,7 +325,7 @@ async function buildComposite({
     line1,
     line2,
     line3,
-    fill: textFill
+    fill: foreground
   });
 
   composites.push({
@@ -268,6 +337,10 @@ async function buildComposite({
   return base.composite(composites).png().toBuffer();
 }
 
+/**
+ * 1. Logos IA
+ * Toujours noirs et transparents
+ */
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
     const { prompt, count = 3 } = req.body || {};
@@ -328,6 +401,10 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
   }
 });
 
+/**
+ * 2. Preview plaques couleurs
+ * Recolorie les logos + texte selon la plaque
+ */
 app.post("/api/render/preview", async (req, res) => {
   try {
     const {
@@ -343,6 +420,8 @@ app.post("/api/render/preview", async (req, res) => {
     const previews = [];
 
     for (const [colorKey, bgUrl] of Object.entries(PLATE_BACKGROUNDS)) {
+      const foreground = FOREGROUND_BY_COLOR[colorKey] || "#111111";
+
       const composedBuffer = await buildComposite({
         backgroundUrl: bgUrl,
         dimension,
@@ -351,8 +430,7 @@ app.post("/api/render/preview", async (req, res) => {
         line3,
         leftLogoUrl,
         rightLogoUrl,
-        textFill: "#111111",
-        output: "preview"
+        foreground
       });
 
       const fileName = `${Date.now()}-${slugify(colorKey)}-${Math.random().toString(36).slice(2, 8)}.png`;
@@ -375,6 +453,11 @@ app.post("/api/render/preview", async (req, res) => {
   }
 });
 
+/**
+ * 3. Fichier production
+ * Transparent, sans fond
+ * Ici je le laisse en noir pour l’atelier
+ */
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
@@ -396,8 +479,7 @@ app.post("/api/render/production", async (req, res) => {
       line3,
       leftLogoUrl,
       rightLogoUrl,
-      textFill: "#111111",
-      output: "production"
+      foreground: "#111111"
     });
 
     const fileName = `${Date.now()}-production-${Math.random().toString(36).slice(2, 8)}.png`;
@@ -416,21 +498,41 @@ app.post("/api/render/production", async (req, res) => {
   }
 });
 
+/**
+ * 4. Résolution variant
+ * Dépend maintenant de :
+ * - dimension
+ * - épaisseur
+ * - couleur
+ */
 app.post("/api/variant/resolve", async (req, res) => {
   try {
-    const { dimension, thickness } = req.body || {};
+    const { dimension, thickness, color } = req.body || {};
 
-    if (!dimension || !thickness) {
+    if (!dimension || !thickness || !color) {
       return res.status(400).json({
-        error: "Dimension ou épaisseur manquante."
+        error: "Dimension, épaisseur ou couleur manquante."
       });
     }
 
-    const found = VARIANT_MAP?.[dimension]?.[thickness];
+    const allowedThickness = ALLOWED_THICKNESS_BY_COLOR[color];
+    if (!allowedThickness) {
+      return res.status(404).json({
+        error: "Couleur introuvable."
+      });
+    }
+
+    if (!allowedThickness.includes(thickness)) {
+      return res.status(400).json({
+        error: `L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`
+      });
+    }
+
+    const found = VARIANT_MAP?.[dimension]?.[thickness]?.[color];
 
     if (!found) {
       return res.status(404).json({
-        error: "Variant introuvable pour cette dimension / épaisseur."
+        error: "Variant introuvable pour cette combinaison."
       });
     }
 
