@@ -65,25 +65,64 @@ function escapeXml(str = "") {
     .replaceAll("'", "&apos;");
 }
 
-/**
- * IMPORTANT
- * Remplace chaque URL par ton vrai fichier Shopify Files
- */
-const PLATE_BACKGROUNDS = {
-  "acier-brosse": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/acier-fd.png",
-  "or": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/or-fd.png"",
-  "cuivre": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/cuivre-fd.png",
-  "blanc": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/blanc-fd.png",
-  "noir": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noir-fd.png",
-  "noir-brillant": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noirm-fd.png",
-  "gris": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/gris-fd.png",
-  "noyer": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noyer-fd.png",
-  "rose": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/rose-fd.png"
-};
+function normalizeDimension(value = "") {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replaceAll(" ", "")
+    .replaceAll("x", "x");
+}
+
+function normalizeThickness(value = "") {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace("mm", "")
+    .replace(",", ".")
+    .trim();
+}
+
+function normalizeColor(value = "") {
+  const v = String(value).trim().toLowerCase();
+
+  const map = {
+    "acier brossé": "acier-brosse",
+    "acier-brosse": "acier-brosse",
+    "acier": "acier-brosse",
+
+    "or brossé": "or",
+    "or": "or",
+
+    "cuivre": "cuivre",
+    "blanc": "blanc",
+    "noir": "noir",
+
+    "noir brillant": "noir-brillant",
+    "noir-brillant": "noir-brillant",
+
+    "gris": "gris",
+    "noyer": "noyer",
+    "rose": "rose"
+  };
+
+  return map[v] || v;
+}
 
 /**
- * Couleur texte/logo selon la plaque
+ * Remplace par tes vraies URLs Shopify Files
  */
+const PLATE_BACKGROUNDS = {
+  "acier-brosse": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-acier-brosse.png",
+  "or": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-or.png",
+  "cuivre": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-cuivre.png",
+  "blanc": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-blanc.png",
+  "noir": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-noir.png",
+  "noir-brillant": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-noir-brillant.png",
+  "gris": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-gris.png",
+  "noyer": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-noyer.png",
+  "rose": "https://cdn.shopify.com/s/files/1/0000/0000/0000/files/plaque-rose.png"
+};
+
 const FOREGROUND_BY_COLOR = {
   "acier-brosse": "#111111",
   "or": "#111111",
@@ -98,7 +137,22 @@ const FOREGROUND_BY_COLOR = {
 };
 
 /**
- * Couleurs disponibles par épaisseur
+ * RÈGLE MÉTIER FINALE
+ * 3.2 mm autorisé UNIQUEMENT pour :
+ * - blanc
+ * - noir
+ * - acier-brosse
+ * - or
+ * - cuivre
+ *
+ * 1.6 mm uniquement pour :
+ * - noir-brillant
+ * - gris
+ * - noyer
+ * - rose
+ *
+ * Même si Shopify contient des variants 3.2 pour ces couleurs,
+ * le configurateur les bloque volontairement ici.
  */
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse": ["1.6", "3.2"],
@@ -113,85 +167,132 @@ const ALLOWED_THICKNESS_BY_COLOR = {
   "rose": ["1.6"]
 };
 
-/**
- * Gabarits
- * Adapte si besoin à tes vraies tailles
- */
 const DIMENSION_MAP = {
+  "100x25mm": { width: 1181, height: 295 },
+  "150x37mm": { width: 1772, height: 437 },
+  "200x50mm": { width: 2362, height: 591 },
+  "250x87mm": { width: 2953, height: 1028 },
+  "300x100mm": { width: 3543, height: 1181 },
+
   "100x25": { width: 1181, height: 295 },
-  "150x50": { width: 1772, height: 591 },
-  "200x50": { width: 2362, height: 591 }
+  "150x37": { width: 1772, height: 437 },
+  "200x50": { width: 2362, height: 591 },
+  "250x87": { width: 2953, height: 1028 },
+  "300x100": { width: 3543, height: 1181 }
 };
 
-function getCanvasSize(dimension = "100x25") {
-  return DIMENSION_MAP[dimension] || DIMENSION_MAP["100x25"];
+function getCanvasSize(dimension = "100x25mm") {
+  const key = normalizeDimension(dimension);
+  return DIMENSION_MAP[key] || DIMENSION_MAP["100x25mm"];
 }
 
 /**
- * Variant map
- * À remplacer par tes vrais IDs Shopify
+ * VARIANT IDS SEULEMENT
+ * Plus aucun prix ici.
  */
 const VARIANT_MAP = {
-  "100x25": {
+  "100x25mm": {
     "1.6": {
-      "acier-brosse": { variantId: 11111111111111, price: "19.90", priceFormatted: "19,90 €" },
-      "or": { variantId: 11111111111112, price: "19.90", priceFormatted: "19,90 €" },
-      "cuivre": { variantId: 11111111111113, price: "19.90", priceFormatted: "19,90 €" },
-      "blanc": { variantId: 11111111111114, price: "19.90", priceFormatted: "19,90 €" },
-      "noir": { variantId: 11111111111115, price: "19.90", priceFormatted: "19,90 €" },
-      "noir-brillant": { variantId: 11111111111116, price: "19.90", priceFormatted: "19,90 €" },
-      "gris": { variantId: 11111111111117, price: "19.90", priceFormatted: "19,90 €" },
-      "noyer": { variantId: 11111111111118, price: "19.90", priceFormatted: "19,90 €" },
-      "rose": { variantId: 11111111111119, price: "19.90", priceFormatted: "19,90 €" }
+      "acier-brosse": { variantId: 53526180430151 },
+      "or": { variantId: 53556221837639 },
+      "cuivre": { variantId: 53556222165319 },
+      "noir": { variantId: 53556222492999 },
+      "blanc": { variantId: 53556222820679 },
+      "noir-brillant": { variantId: 53556223148359 },
+      "noyer": { variantId: 53556223476039 },
+      "gris": { variantId: 53556223803719 },
+      "rose": { variantId: 53556224131399 }
     },
     "3.2": {
-      "acier-brosse": { variantId: 11111111111121, price: "22.90", priceFormatted: "22,90 €" },
-      "or": { variantId: 11111111111122, price: "22.90", priceFormatted: "22,90 €" },
-      "cuivre": { variantId: 11111111111123, price: "22.90", priceFormatted: "22,90 €" },
-      "blanc": { variantId: 11111111111124, price: "22.90", priceFormatted: "22,90 €" },
-      "noir": { variantId: 11111111111125, price: "22.90", priceFormatted: "22,90 €" }
+      "acier-brosse": { variantId: 53526183870791 },
+      "or": { variantId: 53556221870407 },
+      "cuivre": { variantId: 53556222198087 },
+      "noir": { variantId: 53556222525767 },
+      "blanc": { variantId: 53556222853447 }
     }
   },
 
-  "150x50": {
+  "150x37mm": {
     "1.6": {
-      "acier-brosse": { variantId: 11111111111131, price: "24.90", priceFormatted: "24,90 €" },
-      "or": { variantId: 11111111111132, price: "24.90", priceFormatted: "24,90 €" },
-      "cuivre": { variantId: 11111111111133, price: "24.90", priceFormatted: "24,90 €" },
-      "blanc": { variantId: 11111111111134, price: "24.90", priceFormatted: "24,90 €" },
-      "noir": { variantId: 11111111111135, price: "24.90", priceFormatted: "24,90 €" },
-      "noir-brillant": { variantId: 11111111111136, price: "24.90", priceFormatted: "24,90 €" },
-      "gris": { variantId: 11111111111137, price: "24.90", priceFormatted: "24,90 €" },
-      "noyer": { variantId: 11111111111138, price: "24.90", priceFormatted: "24,90 €" },
-      "rose": { variantId: 11111111111139, price: "24.90", priceFormatted: "24,90 €" }
+      "acier-brosse": { variantId: 53526180462919 },
+      "or": { variantId: 53556221903175 },
+      "cuivre": { variantId: 53556222230855 },
+      "noir": { variantId: 53556222558535 },
+      "blanc": { variantId: 53556222886215 },
+      "noir-brillant": { variantId: 53556223213895 },
+      "noyer": { variantId: 53556223541575 },
+      "gris": { variantId: 53556223869255 },
+      "rose": { variantId: 53556224196935 }
     },
     "3.2": {
-      "acier-brosse": { variantId: 11111111111141, price: "27.90", priceFormatted: "27,90 €" },
-      "or": { variantId: 11111111111142, price: "27.90", priceFormatted: "27,90 €" },
-      "cuivre": { variantId: 11111111111143, price: "27.90", priceFormatted: "27,90 €" },
-      "blanc": { variantId: 11111111111144, price: "27.90", priceFormatted: "27,90 €" },
-      "noir": { variantId: 11111111111145, price: "27.90", priceFormatted: "27,90 €" }
+      "acier-brosse": { variantId: 53526183903559 },
+      "or": { variantId: 53556221935943 },
+      "cuivre": { variantId: 53556222263623 },
+      "noir": { variantId: 53556222591303 },
+      "blanc": { variantId: 53556222918983 }
     }
   },
 
-  "200x50": {
+  "200x50mm": {
     "1.6": {
-      "acier-brosse": { variantId: 11111111111151, price: "29.90", priceFormatted: "29,90 €" },
-      "or": { variantId: 11111111111152, price: "29.90", priceFormatted: "29,90 €" },
-      "cuivre": { variantId: 11111111111153, price: "29.90", priceFormatted: "29,90 €" },
-      "blanc": { variantId: 11111111111154, price: "29.90", priceFormatted: "29,90 €" },
-      "noir": { variantId: 11111111111155, price: "29.90", priceFormatted: "29,90 €" },
-      "noir-brillant": { variantId: 11111111111156, price: "29.90", priceFormatted: "29,90 €" },
-      "gris": { variantId: 11111111111157, price: "29.90", priceFormatted: "29,90 €" },
-      "noyer": { variantId: 11111111111158, price: "29.90", priceFormatted: "29,90 €" },
-      "rose": { variantId: 11111111111159, price: "29.90", priceFormatted: "29,90 €" }
+      "acier-brosse": { variantId: 53526180495687 },
+      "or": { variantId: 53556221968711 },
+      "cuivre": { variantId: 53556222296391 },
+      "noir": { variantId: 53556222624071 },
+      "blanc": { variantId: 53556222951751 },
+      "noir-brillant": { variantId: 53556223279431 },
+      "noyer": { variantId: 53556223607111 },
+      "gris": { variantId: 53556223934791 },
+      "rose": { variantId: 53556224262471 }
     },
     "3.2": {
-      "acier-brosse": { variantId: 11111111111161, price: "32.90", priceFormatted: "32,90 €" },
-      "or": { variantId: 11111111111162, price: "32.90", priceFormatted: "32,90 €" },
-      "cuivre": { variantId: 11111111111163, price: "32.90", priceFormatted: "32,90 €" },
-      "blanc": { variantId: 11111111111164, price: "32.90", priceFormatted: "32,90 €" },
-      "noir": { variantId: 11111111111165, price: "32.90", priceFormatted: "32,90 €" }
+      "acier-brosse": { variantId: 53526183936327 },
+      "or": { variantId: 53556222001479 },
+      "cuivre": { variantId: 53556222329159 },
+      "noir": { variantId: 53556222656839 },
+      "blanc": { variantId: 53556222984519 }
+    }
+  },
+
+  "250x87mm": {
+    "1.6": {
+      "acier-brosse": { variantId: 53526180528455 },
+      "or": { variantId: 53556222034247 },
+      "cuivre": { variantId: 53556222361927 },
+      "noir": { variantId: 53556222689607 },
+      "blanc": { variantId: 53556223017287 },
+      "noir-brillant": { variantId: 53556223344967 },
+      "noyer": { variantId: 53556223672647 },
+      "gris": { variantId: 53556224000327 },
+      "rose": { variantId: 53556224328007 }
+    },
+    "3.2": {
+      "acier-brosse": { variantId: 53526183969095 },
+      "or": { variantId: 53556222067015 },
+      "cuivre": { variantId: 53556222394695 },
+      "noir": { variantId: 53556222722375 },
+      "blanc": { variantId: 53556223050055 }
+    }
+  },
+
+  "300x100mm": {
+    "1.6": {
+      "acier-brosse": { variantId: 53526180561223 },
+      "or": { variantId: 53556222099783 },
+      "cuivre": { variantId: 53556222427463 },
+      "noir": { variantId: 53556222755143 },
+      "blanc": { variantId: 53556223082823 },
+      "noir-brillant": { variantId: 53556223410503 },
+      "noyer": { variantId: 53556223738183 },
+      "gris": { variantId: 53556224065863 },
+      "rose": { variantId: 53556224393543 }
+    },
+    "3.2": {
+      "acier-brosse": { variantId: 53526184001863 },
+      "or": { variantId: 53556222132551 },
+      "cuivre": { variantId: 53556222460231 },
+      "noir": { variantId: 53556222787911 },
+      "blanc": { variantId: 53556223115591 }
     }
   }
 };
@@ -213,7 +314,6 @@ function buildTextSvg({
   const font3 = Math.round(height * 0.18);
 
   const x = Math.round(width / 2);
-
   const y1 = Math.round(height * 0.30);
   const y2 = Math.round(height * 0.60);
   const y3 = Math.round(height * 0.82);
@@ -258,7 +358,7 @@ async function fitLogo(buffer, boxWidth, boxHeight, tintHex = null) {
 
 async function buildComposite({
   backgroundUrl = null,
-  dimension = "100x25",
+  dimension = "100x25mm",
   line1 = "",
   line2 = "",
   line3 = "",
@@ -338,8 +438,8 @@ async function buildComposite({
 }
 
 /**
- * 1. Logos IA
- * Toujours noirs et transparents
+ * Génération logos
+ * Toujours noirs + fond transparent
  */
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
@@ -402,8 +502,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 });
 
 /**
- * 2. Preview plaques couleurs
- * Recolorie les logos + texte selon la plaque
+ * Preview plaques
  */
 app.post("/api/render/preview", async (req, res) => {
   try {
@@ -413,7 +512,7 @@ app.post("/api/render/preview", async (req, res) => {
       line3 = "",
       leftLogoUrl = null,
       rightLogoUrl = null,
-      dimension = "100x25"
+      dimension = "100x25mm"
     } = req.body || {};
 
     const baseUrl = getBaseUrl(req);
@@ -454,9 +553,8 @@ app.post("/api/render/preview", async (req, res) => {
 });
 
 /**
- * 3. Fichier production
- * Transparent, sans fond
- * Ici je le laisse en noir pour l’atelier
+ * Fichier production atelier
+ * Transparent + noir
  */
 app.post("/api/render/production", async (req, res) => {
   try {
@@ -464,7 +562,7 @@ app.post("/api/render/production", async (req, res) => {
       line1 = "",
       line2 = "",
       line3 = "",
-      dimension = "100x25",
+      dimension = "100x25mm",
       leftLogoUrl = null,
       rightLogoUrl = null
     } = req.body || {};
@@ -499,15 +597,15 @@ app.post("/api/render/production", async (req, res) => {
 });
 
 /**
- * 4. Résolution variant
- * Dépend maintenant de :
- * - dimension
- * - épaisseur
- * - couleur
+ * Résolution variant
+ * Pas de prix
+ * Retourne seulement le bon variantId
  */
 app.post("/api/variant/resolve", async (req, res) => {
   try {
-    const { dimension, thickness, color } = req.body || {};
+    const dimension = normalizeDimension(req.body?.dimension || "");
+    const thickness = normalizeThickness(req.body?.thickness || "");
+    const color = normalizeColor(req.body?.color || "");
 
     if (!dimension || !thickness || !color) {
       return res.status(400).json({
