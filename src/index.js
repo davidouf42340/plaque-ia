@@ -107,9 +107,6 @@ function normalizeColor(value = "") {
   return map[v] || v;
 }
 
-/**
- * Tes vraies URLs Shopify Files
- */
 const PLATE_BACKGROUNDS = {
   "acier-brosse": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/acier-fd.png",
   "or": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/or-fd.png",
@@ -135,20 +132,6 @@ const FOREGROUND_BY_COLOR = {
   "rose": "#FFFFFF"
 };
 
-/**
- * 3.2 mm autorisé UNIQUEMENT pour :
- * - acier-brosse
- * - or
- * - cuivre
- * - blanc
- * - noir
- *
- * 1.6 mm UNIQUEMENT pour :
- * - noir-brillant
- * - gris
- * - noyer
- * - rose
- */
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse": ["1.6", "3.2"],
   "or": ["1.6", "3.2"],
@@ -181,10 +164,6 @@ function getCanvasSize(dimension = "100x25mm") {
   return DIMENSION_MAP[key] || DIMENSION_MAP["100x25mm"];
 }
 
-/**
- * Variant IDs SEULEMENT
- * Pas de prix ici
- */
 const VARIANT_MAP = {
   "100x25mm": {
     "1.6": {
@@ -304,14 +283,14 @@ function buildTextSvg({
   const safe2 = escapeXml(line2);
   const safe3 = escapeXml(line3);
 
-  const font1 = Math.round(height * 0.30);
-  const font2 = Math.round(height * 0.20);
-  const font3 = Math.round(height * 0.16);
+  const font1 = Math.round(height * 0.40);
+  const font2 = Math.round(height * 0.24);
+  const font3 = Math.round(height * 0.18);
 
   const x = Math.round(width / 2);
-  const y1 = Math.round(height * 0.30);
-  const y2 = Math.round(height * 0.58);
-  const y3 = Math.round(height * 0.80);
+  const y1 = Math.round(height * 0.28);
+  const y2 = Math.round(height * 0.57);
+  const y3 = Math.round(height * 0.82);
 
   return Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -324,13 +303,13 @@ function buildTextSvg({
         }
         .l2 {
           font-family: "DejaVu Sans", sans-serif;
-          font-weight: 500;
+          font-weight: 600;
           font-size: ${font2}px;
           fill: ${fill};
         }
         .l3 {
           font-family: "DejaVu Sans", sans-serif;
-          font-weight: 500;
+          font-weight: 600;
           font-size: ${font3}px;
           fill: ${fill};
         }
@@ -367,31 +346,39 @@ async function fetchImageBuffer(url) {
 async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
   const { r, g, b } = hexToRgb(colorHex);
 
-  const resized = sharp(buffer).resize({
-    width: boxWidth,
-    height: boxHeight,
-    fit: "contain",
-    withoutEnlargement: true
-  });
+  const trimmed = sharp(buffer)
+    .ensureAlpha()
+    .trim()
+    .resize({
+      width: boxWidth,
+      height: boxHeight,
+      fit: "contain",
+      withoutEnlargement: true,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    });
 
-  const alpha = await resized
+  const resizedMeta = await trimmed.metadata();
+  const logoW = resizedMeta.width || boxWidth;
+  const logoH = resizedMeta.height || boxHeight;
+
+  const logoBuffer = await trimmed.png().toBuffer();
+
+  const alpha = await sharp(logoBuffer)
     .ensureAlpha()
     .extractChannel("alpha")
     .toBuffer();
 
-  const colored = await sharp({
+  return sharp({
     create: {
-      width: boxWidth,
-      height: boxHeight,
-      channels: 4,
-      background: { r, g, b, alpha: 1 }
+      width: logoW,
+      height: logoH,
+      channels: 3,
+      background: { r, g, b }
     }
   })
     .joinChannel(alpha)
     .png()
     .toBuffer();
-
-  return colored;
 }
 
 async function buildComposite({
@@ -427,44 +414,35 @@ async function buildComposite({
   const hasLeft = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
 
-  // logo ≈ 25% de la largeur
   const logoBoxWidth = Math.round(width * 0.25);
-  const logoBoxHeight = Math.round(height * 0.72);
-  const sideMargin = Math.round(width * 0.025);
+  const logoBoxHeight = Math.round(height * 0.76);
+  const sideMargin = Math.round(width * 0.02);
 
-  const textZoneLeft = hasLeft ? Math.round(width * 0.24) : Math.round(width * 0.05);
-  const textZoneRight = hasRight ? Math.round(width * 0.24) : Math.round(width * 0.05);
+  const textZoneLeft = hasLeft ? Math.round(width * 0.26) : Math.round(width * 0.05);
+  const textZoneRight = hasRight ? Math.round(width * 0.26) : Math.round(width * 0.05);
   const textZoneWidth = width - textZoneLeft - textZoneRight;
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(
-      leftLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      foreground
-    );
+    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
+    const logoMeta = await sharp(preparedLeftLogo).metadata();
 
     composites.push({
       input: preparedLeftLogo,
       left: sideMargin,
-      top: Math.round((height - logoBoxHeight) / 2)
+      top: Math.round((height - (logoMeta.height || logoBoxHeight)) / 2)
     });
   }
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(
-      rightLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      foreground
-    );
+    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
+    const logoMeta = await sharp(preparedRightLogo).metadata();
 
     composites.push({
       input: preparedRightLogo,
-      left: width - logoBoxWidth - sideMargin,
-      top: Math.round((height - logoBoxHeight) / 2)
+      left: width - (logoMeta.width || logoBoxWidth) - sideMargin,
+      top: Math.round((height - (logoMeta.height || logoBoxHeight)) / 2)
     });
   }
 
@@ -486,10 +464,6 @@ async function buildComposite({
   return base.composite(composites).png().toBuffer();
 }
 
-/**
- * 1. Logos IA
- * Toujours noirs et transparents
- */
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
     const { prompt, count = 3 } = req.body || {};
@@ -550,9 +524,6 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
   }
 });
 
-/**
- * 2. Preview plaques
- */
 app.post("/api/render/preview", async (req, res) => {
   try {
     const {
@@ -601,10 +572,6 @@ app.post("/api/render/preview", async (req, res) => {
   }
 });
 
-/**
- * 3. Fichier production atelier
- * Transparent + noir
- */
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
@@ -645,10 +612,6 @@ app.post("/api/render/production", async (req, res) => {
   }
 });
 
-/**
- * 4. Résolution variant
- * Retourne seulement le bon variantId
- */
 app.post("/api/variant/resolve", async (req, res) => {
   try {
     const dimension = normalizeDimension(req.body?.dimension || "");
