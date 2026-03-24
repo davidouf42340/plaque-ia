@@ -22,12 +22,9 @@ const openai = new OpenAI({
 
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
-const previewsDir = path.join(generatedDir, "previews");
 const productionDir = path.join(generatedDir, "production");
-const fontsDir = path.join(__dirname, "fonts");
 
 fs.mkdirSync(logosDir, { recursive: true });
-fs.mkdirSync(previewsDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
 
 app.use("/generated", express.static(generatedDir));
@@ -77,17 +74,13 @@ function normalizeColor(value = "") {
     "acier brossé": "acier-brosse",
     "acier-brosse": "acier-brosse",
     "acier": "acier-brosse",
-
     "or brossé": "or",
     "or": "or",
-
     "cuivre": "cuivre",
     "blanc": "blanc",
     "noir": "noir",
-
     "noir brillant": "noir-brillant",
     "noir-brillant": "noir-brillant",
-
     "gris": "gris",
     "noyer": "noyer",
     "rose": "rose"
@@ -96,38 +89,12 @@ function normalizeColor(value = "") {
   return map[v] || v;
 }
 
-const PLATE_BACKGROUNDS = {
-  "acier-brosse": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/acier-fd.png",
-  "or": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/or-fd.png",
-  "cuivre": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/cuivre-fd.png",
-  "blanc": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/blanc-fd.png",
-  "noir": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noir-fd.png",
-  "noir-brillant": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noirm-fd.png",
-  "gris": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/gris-fd.png",
-  "noyer": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/noyer-fd.png",
-  "rose": "https://cdn.shopify.com/s/files/1/0267/9436/1022/files/rose-fd.png"
-};
-
-const FOREGROUND_BY_COLOR = {
-  "acier-brosse": "#111111",
-  "or": "#111111",
-  "cuivre": "#111111",
-  "blanc": "#111111",
-
-  "noir": "#FFFFFF",
-  "noir-brillant": "#FFFFFF",
-  "gris": "#FFFFFF",
-  "noyer": "#FFFFFF",
-  "rose": "#FFFFFF"
-};
-
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse": ["1.6", "3.2"],
   "or": ["1.6", "3.2"],
   "cuivre": ["1.6", "3.2"],
   "blanc": ["1.6", "3.2"],
   "noir": ["1.6", "3.2"],
-
   "noir-brillant": ["1.6"],
   "gris": ["1.6"],
   "noyer": ["1.6"],
@@ -260,158 +227,6 @@ const VARIANT_MAP = {
   }
 };
 
-/**
- * Mapping des polices de ton configurateur vers TES fichiers locaux
- */
-const FONT_FILES = {
-  sans: path.join(fontsDir, "modern.ttf"),
-  serif: path.join(fontsDir, "elegant.ttf"),
-  mono: path.join(fontsDir, "impact.ttf"),
-  design: path.join(fontsDir, "design.ttf"),
-  script: path.join(fontsDir, "script.ttf")
-};
-
-function normalizeFontFamilies(fontFamilies = {}) {
-  const allowed = ["sans", "serif", "mono", "design", "script"];
-  return {
-    line1: allowed.includes(fontFamilies.line1) ? fontFamilies.line1 : "sans",
-    line2: allowed.includes(fontFamilies.line2) ? fontFamilies.line2 : "sans",
-    line3: allowed.includes(fontFamilies.line3) ? fontFamilies.line3 : "sans"
-  };
-}
-
-function normalizeTextScale(textScale = {}) {
-  const parseScale = (value, fallback) => {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(1.8, Math.max(0.6, n));
-  };
-
-  return {
-    line1: parseScale(textScale.line1, 1),
-    line2: parseScale(textScale.line2, 1),
-    line3: parseScale(textScale.line3, 1)
-  };
-}
-
-async function makeTextImage({
-  text = "",
-  width,
-  height,
-  fill = "#111111",
-  fontFile,
-  fontSize = 40
-}) {
-  if (!text || !String(text).trim()) {
-    return null;
-  }
-
-  const svg = `
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <style>
-        @font-face {
-          font-family: "CustomFont";
-          src: url("file://${fontFile.replace(/\\/g, "/")}");
-        }
-        text {
-          font-family: "CustomFont";
-          fill: ${fill};
-          font-size: ${fontSize}px;
-          font-weight: 700;
-        }
-      </style>
-      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">
-        ${String(text)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")}
-      </text>
-    </svg>
-  `;
-
-  return sharp(Buffer.from(svg)).png().toBuffer();
-}
-
-async function buildTextComposites({
-  width,
-  height,
-  offsetLeft = 0,
-  line1 = "",
-  line2 = "",
-  line3 = "",
-  fill = "#111111",
-  fontFamilies = {},
-  textScale = {}
-}) {
-  const families = normalizeFontFamilies(fontFamilies);
-  const scales = normalizeTextScale(textScale);
-
-  const base1 = Math.round(height * 0.40);
-  const base2 = Math.round(height * 0.24);
-  const base3 = Math.round(height * 0.18);
-
-  const font1 = Math.max(14, Math.round(base1 * scales.line1));
-  const font2 = Math.max(12, Math.round(base2 * scales.line2));
-  const font3 = Math.max(10, Math.round(base3 * scales.line3));
-
-  const lineHeight = Math.round(height * 0.24);
-
-  const composites = [];
-
-  const img1 = await makeTextImage({
-    text: line1,
-    width,
-    height: lineHeight,
-    fill,
-    fontFile: FONT_FILES[families.line1],
-    fontSize: font1
-  });
-
-  const img2 = await makeTextImage({
-    text: line2,
-    width,
-    height: lineHeight,
-    fill,
-    fontFile: FONT_FILES[families.line2],
-    fontSize: font2
-  });
-
-  const img3 = await makeTextImage({
-    text: line3,
-    width,
-    height: lineHeight,
-    fill,
-    fontFile: FONT_FILES[families.line3],
-    fontSize: font3
-  });
-
-  if (img1) {
-    composites.push({
-      input: img1,
-      left: offsetLeft,
-      top: Math.round(height * 0.10)
-    });
-  }
-
-  if (img2) {
-    composites.push({
-      input: img2,
-      left: offsetLeft,
-      top: Math.round(height * 0.38)
-    });
-  }
-
-  if (img3) {
-    composites.push({
-      input: img3,
-      left: offsetLeft,
-      top: Math.round(height * 0.62)
-    });
-  }
-
-  return composites;
-}
-
 function hexToRgb(hex = "#111111") {
   const clean = hex.replace("#", "");
   const full = clean.length === 3
@@ -487,38 +302,100 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
     .toBuffer();
 }
 
-async function buildComposite({
-  backgroundUrl = null,
+function normalizeTextScale(textScale = {}) {
+  const parseScale = (value, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(1.8, Math.max(0.6, n));
+  };
+
+  return {
+    line1: parseScale(textScale.line1, 1),
+    line2: parseScale(textScale.line2, 1),
+    line3: parseScale(textScale.line3, 1)
+  };
+}
+
+/**
+ * Production simple :
+ * texte noir vectorisé de façon minimaliste en SVG système
+ * Cette partie sert seulement au fichier atelier, pas à l’aperçu client.
+ */
+function escapeXml(str = "") {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function buildProductionTextSvg({
+  width,
+  height,
+  line1 = "",
+  line2 = "",
+  line3 = "",
+  textScale = {}
+}) {
+  const safe1 = escapeXml(line1);
+  const safe2 = escapeXml(line2);
+  const safe3 = escapeXml(line3);
+
+  const scales = normalizeTextScale(textScale);
+
+  const base1 = Math.round(height * 0.40);
+  const base2 = Math.round(height * 0.24);
+  const base3 = Math.round(height * 0.18);
+
+  const font1 = Math.max(14, Math.round(base1 * scales.line1));
+  const font2 = Math.max(12, Math.round(base2 * scales.line2));
+  const font3 = Math.max(10, Math.round(base3 * scales.line3));
+
+  const x = Math.round(width / 2);
+  const y1 = Math.round(height * 0.28);
+  const y2 = Math.round(height * 0.57);
+  const y3 = Math.round(height * 0.82);
+
+  return Buffer.from(`
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <style>
+        .l1, .l2, .l3 {
+          fill: #111111;
+          font-family: Arial, sans-serif;
+        }
+        .l1 { font-size: ${font1}px; font-weight: 700; }
+        .l2 { font-size: ${font2}px; font-weight: 600; }
+        .l3 { font-size: ${font3}px; font-weight: 600; }
+      </style>
+      ${safe1 ? `<text x="${x}" y="${y1}" text-anchor="middle" class="l1">${safe1}</text>` : ""}
+      ${safe2 ? `<text x="${x}" y="${y2}" text-anchor="middle" class="l2">${safe2}</text>` : ""}
+      ${safe3 ? `<text x="${x}" y="${y3}" text-anchor="middle" class="l3">${safe3}</text>` : ""}
+    </svg>
+  `);
+}
+
+async function buildProductionComposite({
   dimension = "100x25mm",
   line1 = "",
   line2 = "",
   line3 = "",
   leftLogoUrl = null,
   rightLogoUrl = null,
-  foreground = "#111111",
-  fontFamilies = {},
   textScale = {}
 }) {
   const { width, height } = getCanvasSize(dimension);
 
-  let base;
-
-  if (backgroundUrl) {
-    const bgBuffer = await fetchImageBuffer(backgroundUrl);
-    base = sharp(bgBuffer).resize(width, height, { fit: "fill" });
-  } else {
-    base = sharp({
-      create: {
-        width,
-        height,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 }
-      }
-    });
-  }
+  const base = sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  });
 
   const composites = [];
-
   const hasLeft = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
 
@@ -532,13 +409,7 @@ async function buildComposite({
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(
-      leftLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      foreground
-    );
-
+    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, "#111111");
     composites.push({
       input: preparedLeftLogo,
       left: sideMargin,
@@ -548,13 +419,7 @@ async function buildComposite({
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(
-      rightLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      foreground
-    );
-
+    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, "#111111");
     composites.push({
       input: preparedRightLogo,
       left: width - logoBoxWidth - sideMargin,
@@ -562,19 +427,20 @@ async function buildComposite({
     });
   }
 
-  const textComposites = await buildTextComposites({
+  const textSvg = buildProductionTextSvg({
     width: textZoneWidth,
     height,
-    offsetLeft: textZoneLeft,
     line1,
     line2,
     line3,
-    fill: foreground,
-    fontFamilies,
     textScale
   });
 
-  composites.push(...textComposites);
+  composites.push({
+    input: textSvg,
+    left: textZoneLeft,
+    top: 0
+  });
 
   return base.composite(composites).png().toBuffer();
 }
@@ -639,112 +505,6 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
   }
 });
 
-app.post("/api/render/preview", async (req, res) => {
-  try {
-    const {
-      line1 = "",
-      line2 = "",
-      line3 = "",
-      leftLogoUrl = null,
-      rightLogoUrl = null,
-      dimension = "100x25mm",
-      fontFamilies = {},
-      textScale = {}
-    } = req.body || {};
-
-    const baseUrl = getBaseUrl(req);
-    const previews = [];
-
-    for (const [colorKey, bgUrl] of Object.entries(PLATE_BACKGROUNDS)) {
-      const foreground = FOREGROUND_BY_COLOR[colorKey] || "#111111";
-
-      const composedBuffer = await buildComposite({
-        backgroundUrl: bgUrl,
-        dimension,
-        line1,
-        line2,
-        line3,
-        leftLogoUrl,
-        rightLogoUrl,
-        foreground,
-        fontFamilies,
-        textScale
-      });
-
-      const fileName = `${Date.now()}-${slugify(colorKey)}-${Math.random().toString(36).slice(2, 8)}.png`;
-      const filePath = path.join(previewsDir, fileName);
-
-      fs.writeFileSync(filePath, composedBuffer);
-
-      previews.push({
-        color: colorKey,
-        url: `${baseUrl}/generated/previews/${fileName}`
-      });
-    }
-
-    return res.json({ previews });
-  } catch (error) {
-    console.error("Erreur /api/render/preview :", error);
-    return res.status(500).json({
-      error: error?.message || "Erreur interne génération aperçu."
-    });
-  }
-});
-
-app.post("/api/render/single-preview", async (req, res) => {
-  try {
-    const {
-      line1 = "",
-      line2 = "",
-      line3 = "",
-      leftLogoUrl = null,
-      rightLogoUrl = null,
-      dimension = "100x25mm",
-      color = "",
-      fontFamilies = {},
-      textScale = {}
-    } = req.body || {};
-
-    const colorKey = normalizeColor(color);
-    const bgUrl = PLATE_BACKGROUNDS[colorKey];
-
-    if (!bgUrl) {
-      return res.status(404).json({ error: "Couleur introuvable." });
-    }
-
-    const foreground = FOREGROUND_BY_COLOR[colorKey] || "#111111";
-    const baseUrl = getBaseUrl(req);
-
-    const composedBuffer = await buildComposite({
-      backgroundUrl: bgUrl,
-      dimension,
-      line1,
-      line2,
-      line3,
-      leftLogoUrl,
-      rightLogoUrl,
-      foreground,
-      fontFamilies,
-      textScale
-    });
-
-    const fileName = `${Date.now()}-single-${slugify(colorKey)}-${Math.random().toString(36).slice(2, 8)}.png`;
-    const filePath = path.join(previewsDir, fileName);
-
-    fs.writeFileSync(filePath, composedBuffer);
-
-    return res.json({
-      color: colorKey,
-      url: `${baseUrl}/generated/previews/${fileName}`
-    });
-  } catch (error) {
-    console.error("Erreur /api/render/single-preview :", error);
-    return res.status(500).json({
-      error: error?.message || "Erreur interne aperçu simple."
-    });
-  }
-});
-
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
@@ -754,22 +514,18 @@ app.post("/api/render/production", async (req, res) => {
       dimension = "100x25mm",
       leftLogoUrl = null,
       rightLogoUrl = null,
-      fontFamilies = {},
       textScale = {}
     } = req.body || {};
 
     const baseUrl = getBaseUrl(req);
 
-    const productionBuffer = await buildComposite({
-      backgroundUrl: null,
+    const productionBuffer = await buildProductionComposite({
       dimension,
       line1,
       line2,
       line3,
       leftLogoUrl,
       rightLogoUrl,
-      foreground: "#111111",
-      fontFamilies,
       textScale
     });
 
