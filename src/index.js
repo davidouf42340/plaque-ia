@@ -24,6 +24,7 @@ const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
 const previewsDir = path.join(generatedDir, "previews");
 const productionDir = path.join(generatedDir, "production");
+const fontsDir = path.join(__dirname, "fonts");
 
 fs.mkdirSync(logosDir, { recursive: true });
 fs.mkdirSync(previewsDir, { recursive: true });
@@ -259,20 +260,23 @@ const VARIANT_MAP = {
   }
 };
 
-function getPangoFontFamily(key = "sans") {
-  const map = {
-    sans: "sans",
-    serif: "serif",
-    mono: "monospace"
-  };
-  return map[key] || "sans";
-}
+/**
+ * Mapping des polices de ton configurateur vers TES fichiers locaux
+ */
+const FONT_FILES = {
+  sans: path.join(fontsDir, "modern.ttf"),
+  serif: path.join(fontsDir, "elegant.ttf"),
+  mono: path.join(fontsDir, "impact.ttf"),
+  design: path.join(fontsDir, "design.ttf"),
+  script: path.join(fontsDir, "script.ttf")
+};
 
 function normalizeFontFamilies(fontFamilies = {}) {
+  const allowed = ["sans", "serif", "mono", "design", "script"];
   return {
-    line1: ["sans", "serif", "mono"].includes(fontFamilies.line1) ? fontFamilies.line1 : "sans",
-    line2: ["sans", "serif", "mono"].includes(fontFamilies.line2) ? fontFamilies.line2 : "sans",
-    line3: ["sans", "serif", "mono"].includes(fontFamilies.line3) ? fontFamilies.line3 : "sans"
+    line1: allowed.includes(fontFamilies.line1) ? fontFamilies.line1 : "sans",
+    line2: allowed.includes(fontFamilies.line2) ? fontFamilies.line2 : "sans",
+    line3: allowed.includes(fontFamilies.line3) ? fontFamilies.line3 : "sans"
   };
 }
 
@@ -290,11 +294,42 @@ function normalizeTextScale(textScale = {}) {
   };
 }
 
-function escapePangoText(str = "") {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+async function makeTextImage({
+  text = "",
+  width,
+  height,
+  fill = "#111111",
+  fontFile,
+  fontSize = 40
+}) {
+  if (!text || !String(text).trim()) {
+    return null;
+  }
+
+  const svg = `
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <style>
+        @font-face {
+          font-family: "CustomFont";
+          src: url("file://${fontFile.replace(/\\/g, "/")}");
+        }
+        text {
+          font-family: "CustomFont";
+          fill: ${fill};
+          font-size: ${fontSize}px;
+          font-weight: 700;
+        }
+      </style>
+      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">
+        ${String(text)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")}
+      </text>
+    </svg>
+  `;
+
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 async function buildTextComposites({
@@ -319,36 +354,60 @@ async function buildTextComposites({
   const font2 = Math.max(12, Math.round(base2 * scales.line2));
   const font3 = Math.max(10, Math.round(base3 * scales.line3));
 
-  const y1 = Math.round(height * 0.08);
-  const y2 = Math.round(height * 0.36);
-  const y3 = Math.round(height * 0.61);
+  const lineHeight = Math.round(height * 0.24);
 
   const composites = [];
 
-  function pushTextBlock(text, fontSize, fontKey, top) {
-    if (!text || !String(text).trim()) return;
+  const img1 = await makeTextImage({
+    text: line1,
+    width,
+    height: lineHeight,
+    fill,
+    fontFile: FONT_FILES[families.line1],
+    fontSize: font1
+  });
 
-    const safe = escapePangoText(text);
+  const img2 = await makeTextImage({
+    text: line2,
+    width,
+    height: lineHeight,
+    fill,
+    fontFile: FONT_FILES[families.line2],
+    fontSize: font2
+  });
 
+  const img3 = await makeTextImage({
+    text: line3,
+    width,
+    height: lineHeight,
+    fill,
+    fontFile: FONT_FILES[families.line3],
+    fontSize: font3
+  });
+
+  if (img1) {
     composites.push({
-      input: {
-        text: {
-          text: `<span foreground="${fill}">${safe}</span>`,
-          width,
-          dpi: 300,
-          rgba: true,
-          align: "center",
-          font: `${getPangoFontFamily(fontKey)} ${fontSize}`
-        }
-      },
+      input: img1,
       left: offsetLeft,
-      top
+      top: Math.round(height * 0.10)
     });
   }
 
-  pushTextBlock(line1, font1, families.line1, y1);
-  pushTextBlock(line2, font2, families.line2, y2);
-  pushTextBlock(line3, font3, families.line3, y3);
+  if (img2) {
+    composites.push({
+      input: img2,
+      left: offsetLeft,
+      top: Math.round(height * 0.38)
+    });
+  }
+
+  if (img3) {
+    composites.push({
+      input: img3,
+      left: offsetLeft,
+      top: Math.round(height * 0.62)
+    });
+  }
 
   return composites;
 }
