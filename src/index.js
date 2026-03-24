@@ -56,15 +56,6 @@ function slugify(value) {
     .slice(0, 80);
 }
 
-function escapeXml(str = "") {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
 function normalizeDimension(value = "") {
   return String(value).trim().toLowerCase().replaceAll(" ", "");
 }
@@ -268,13 +259,13 @@ const VARIANT_MAP = {
   }
 };
 
-function getFontStack(key = "sans") {
+function getPangoFontFamily(key = "sans") {
   const map = {
-    sans: `"DejaVu Sans", sans-serif`,
-    serif: `"DejaVu Serif", serif`,
-    mono: `"DejaVu Sans Mono", monospace`
+    sans: "sans",
+    serif: "serif",
+    mono: "monospace"
   };
-  return map[key] || map.sans;
+  return map[key] || "sans";
 }
 
 function normalizeFontFamilies(fontFamilies = {}) {
@@ -299,9 +290,17 @@ function normalizeTextScale(textScale = {}) {
   };
 }
 
-function buildTextSvg({
+function escapePangoText(str = "") {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+async function buildTextComposites({
   width,
   height,
+  offsetLeft = 0,
   line1 = "",
   line2 = "",
   line3 = "",
@@ -309,10 +308,6 @@ function buildTextSvg({
   fontFamilies = {},
   textScale = {}
 }) {
-  const safe1 = escapeXml(line1);
-  const safe2 = escapeXml(line2);
-  const safe3 = escapeXml(line3);
-
   const families = normalizeFontFamilies(fontFamilies);
   const scales = normalizeTextScale(textScale);
 
@@ -320,42 +315,42 @@ function buildTextSvg({
   const base2 = Math.round(height * 0.24);
   const base3 = Math.round(height * 0.18);
 
-  const font1 = Math.round(base1 * scales.line1);
-  const font2 = Math.round(base2 * scales.line2);
-  const font3 = Math.round(base3 * scales.line3);
+  const font1 = Math.max(14, Math.round(base1 * scales.line1));
+  const font2 = Math.max(12, Math.round(base2 * scales.line2));
+  const font3 = Math.max(10, Math.round(base3 * scales.line3));
 
-  const x = Math.round(width / 2);
-  const y1 = Math.round(height * 0.28);
-  const y2 = Math.round(height * 0.57);
-  const y3 = Math.round(height * 0.82);
+  const y1 = Math.round(height * 0.08);
+  const y2 = Math.round(height * 0.36);
+  const y3 = Math.round(height * 0.61);
 
-  return Buffer.from(`
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <style>
-        .l1 {
-          font-family: ${getFontStack(families.line1)};
-          font-weight: 700;
-          font-size: ${font1}px;
-          fill: ${fill};
+  const composites = [];
+
+  function pushTextBlock(text, fontSize, fontKey, top) {
+    if (!text || !String(text).trim()) return;
+
+    const safe = escapePangoText(text);
+
+    composites.push({
+      input: {
+        text: {
+          text: `<span foreground="${fill}">${safe}</span>`,
+          width,
+          dpi: 300,
+          rgba: true,
+          align: "center",
+          font: `${getPangoFontFamily(fontKey)} ${fontSize}`
         }
-        .l2 {
-          font-family: ${getFontStack(families.line2)};
-          font-weight: 600;
-          font-size: ${font2}px;
-          fill: ${fill};
-        }
-        .l3 {
-          font-family: ${getFontStack(families.line3)};
-          font-weight: 600;
-          font-size: ${font3}px;
-          fill: ${fill};
-        }
-      </style>
-      ${safe1 ? `<text x="${x}" y="${y1}" text-anchor="middle" class="l1">${safe1}</text>` : ""}
-      ${safe2 ? `<text x="${x}" y="${y2}" text-anchor="middle" class="l2">${safe2}</text>` : ""}
-      ${safe3 ? `<text x="${x}" y="${y3}" text-anchor="middle" class="l3">${safe3}</text>` : ""}
-    </svg>
-  `);
+      },
+      left: offsetLeft,
+      top
+    });
+  }
+
+  pushTextBlock(line1, font1, families.line1, y1);
+  pushTextBlock(line2, font2, families.line2, y2);
+  pushTextBlock(line3, font3, families.line3, y3);
+
+  return composites;
 }
 
 function hexToRgb(hex = "#111111") {
@@ -478,7 +473,12 @@ async function buildComposite({
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
+    const preparedLeftLogo = await fitLogo(
+      leftLogoBuffer,
+      logoBoxWidth,
+      logoBoxHeight,
+      foreground
+    );
 
     composites.push({
       input: preparedLeftLogo,
@@ -489,7 +489,12 @@ async function buildComposite({
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
+    const preparedRightLogo = await fitLogo(
+      rightLogoBuffer,
+      logoBoxWidth,
+      logoBoxHeight,
+      foreground
+    );
 
     composites.push({
       input: preparedRightLogo,
@@ -498,9 +503,10 @@ async function buildComposite({
     });
   }
 
-  const textSvg = buildTextSvg({
+  const textComposites = await buildTextComposites({
     width: textZoneWidth,
     height,
+    offsetLeft: textZoneLeft,
     line1,
     line2,
     line3,
@@ -509,11 +515,7 @@ async function buildComposite({
     textScale
   });
 
-  composites.push({
-    input: textSvg,
-    left: textZoneLeft,
-    top: 0
-  });
+  composites.push(...textComposites);
 
   return base.composite(composites).png().toBuffer();
 }
@@ -525,7 +527,9 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
     const imageCount = Math.max(1, Math.min(Number(count) || 3, 3));
 
     if (!cleanPrompt) {
-      return res.status(400).json({ error: "Prompt logo manquant." });
+      return res.status(400).json({
+        error: "Prompt logo manquant."
+      });
     }
 
     const baseUrl = getBaseUrl(req);
@@ -740,7 +744,9 @@ app.post("/api/variant/resolve", async (req, res) => {
 
     const allowedThickness = ALLOWED_THICKNESS_BY_COLOR[color];
     if (!allowedThickness) {
-      return res.status(404).json({ error: "Couleur introuvable." });
+      return res.status(404).json({
+        error: "Couleur introuvable."
+      });
     }
 
     if (!allowedThickness.includes(thickness)) {
@@ -760,7 +766,9 @@ app.post("/api/variant/resolve", async (req, res) => {
     return res.json(found);
   } catch (error) {
     console.error("Erreur /api/variant/resolve :", error);
-    return res.status(500).json({ error: "Erreur interne variant." });
+    return res.status(500).json({
+      error: "Erreur interne variant."
+    });
   }
 });
 
