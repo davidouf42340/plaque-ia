@@ -316,11 +316,6 @@ function normalizeTextScale(textScale = {}) {
   };
 }
 
-/**
- * Production simple :
- * texte noir vectorisé de façon minimaliste en SVG système
- * Cette partie sert seulement au fichier atelier, pas à l’aperçu client.
- */
 function escapeXml(str = "") {
   return String(str)
     .replaceAll("&", "&amp;")
@@ -453,14 +448,14 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 
     if (!cleanPrompt) {
       return res.status(400).json({
-        error: "Prompt logo manquant."
+        error: "Prompt image manquant."
       });
     }
 
     const baseUrl = getBaseUrl(req);
 
     const finalPrompt = [
-      "Créer un pictogramme/logo noir pour gravure laser.",
+      "Créer un pictogramme noir pour gravure laser.",
       "Fond totalement transparent.",
       "Visuel simple, propre, centré, lisible, sans décor, sans ombre, sans fond.",
       "Style pictogramme professionnel, lignes franches, peu de détails fins.",
@@ -500,7 +495,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
   } catch (error) {
     console.error("Erreur /api/logos/search-or-generate :", error);
     return res.status(500).json({
-      error: error?.message || "Erreur interne génération logos."
+      error: error?.message || "Erreur interne génération images."
     });
   }
 });
