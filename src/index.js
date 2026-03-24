@@ -268,21 +268,61 @@ const VARIANT_MAP = {
   }
 };
 
+function getFontStack(key = "sans") {
+  const map = {
+    sans: `"DejaVu Sans", sans-serif`,
+    serif: `"DejaVu Serif", serif`,
+    mono: `"DejaVu Sans Mono", monospace`
+  };
+  return map[key] || map.sans;
+}
+
+function normalizeFontFamilies(fontFamilies = {}) {
+  return {
+    line1: ["sans", "serif", "mono"].includes(fontFamilies.line1) ? fontFamilies.line1 : "sans",
+    line2: ["sans", "serif", "mono"].includes(fontFamilies.line2) ? fontFamilies.line2 : "sans",
+    line3: ["sans", "serif", "mono"].includes(fontFamilies.line3) ? fontFamilies.line3 : "sans"
+  };
+}
+
+function normalizeTextScale(textScale = {}) {
+  const parseScale = (value, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(1.8, Math.max(0.6, n));
+  };
+
+  return {
+    line1: parseScale(textScale.line1, 1),
+    line2: parseScale(textScale.line2, 1),
+    line3: parseScale(textScale.line3, 1)
+  };
+}
+
 function buildTextSvg({
   width,
   height,
   line1 = "",
   line2 = "",
   line3 = "",
-  fill = "#111111"
+  fill = "#111111",
+  fontFamilies = {},
+  textScale = {}
 }) {
   const safe1 = escapeXml(line1);
   const safe2 = escapeXml(line2);
   const safe3 = escapeXml(line3);
 
-  const font1 = Math.round(height * 0.40);
-  const font2 = Math.round(height * 0.24);
-  const font3 = Math.round(height * 0.18);
+  const families = normalizeFontFamilies(fontFamilies);
+  const scales = normalizeTextScale(textScale);
+
+  const base1 = Math.round(height * 0.40);
+  const base2 = Math.round(height * 0.24);
+  const base3 = Math.round(height * 0.18);
+
+  const font1 = Math.round(base1 * scales.line1);
+  const font2 = Math.round(base2 * scales.line2);
+  const font3 = Math.round(base3 * scales.line3);
 
   const x = Math.round(width / 2);
   const y1 = Math.round(height * 0.28);
@@ -293,19 +333,19 @@ function buildTextSvg({
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <style>
         .l1 {
-          font-family: "DejaVu Sans", sans-serif;
+          font-family: ${getFontStack(families.line1)};
           font-weight: 700;
           font-size: ${font1}px;
           fill: ${fill};
         }
         .l2 {
-          font-family: "DejaVu Sans", sans-serif;
+          font-family: ${getFontStack(families.line2)};
           font-weight: 600;
           font-size: ${font2}px;
           fill: ${fill};
         }
         .l3 {
-          font-family: "DejaVu Sans", sans-serif;
+          font-family: ${getFontStack(families.line3)};
           font-weight: 600;
           font-size: ${font3}px;
           fill: ${fill};
@@ -388,13 +428,7 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
       background: { r: 0, g: 0, b: 0, alpha: 0 }
     }
   })
-    .composite([
-      {
-        input: coloredLogo,
-        left,
-        top
-      }
-    ])
+    .composite([{ input: coloredLogo, left, top }])
     .png()
     .toBuffer();
 }
@@ -407,7 +441,9 @@ async function buildComposite({
   line3 = "",
   leftLogoUrl = null,
   rightLogoUrl = null,
-  foreground = "#111111"
+  foreground = "#111111",
+  fontFamilies = {},
+  textScale = {}
 }) {
   const { width, height } = getCanvasSize(dimension);
 
@@ -442,12 +478,7 @@ async function buildComposite({
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(
-      leftLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      foreground
-    );
+    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
 
     composites.push({
       input: preparedLeftLogo,
@@ -458,12 +489,7 @@ async function buildComposite({
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(
-      rightLogoBuffer,
-      logoBoxWidth,
-      logoBoxHeight,
-      foreground
-    );
+    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, foreground);
 
     composites.push({
       input: preparedRightLogo,
@@ -478,7 +504,9 @@ async function buildComposite({
     line1,
     line2,
     line3,
-    fill: foreground
+    fill: foreground,
+    fontFamilies,
+    textScale
   });
 
   composites.push({
@@ -497,9 +525,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
     const imageCount = Math.max(1, Math.min(Number(count) || 3, 3));
 
     if (!cleanPrompt) {
-      return res.status(400).json({
-        error: "Prompt logo manquant."
-      });
+      return res.status(400).json({ error: "Prompt logo manquant." });
     }
 
     const baseUrl = getBaseUrl(req);
@@ -558,7 +584,9 @@ app.post("/api/render/preview", async (req, res) => {
       line3 = "",
       leftLogoUrl = null,
       rightLogoUrl = null,
-      dimension = "100x25mm"
+      dimension = "100x25mm",
+      fontFamilies = {},
+      textScale = {}
     } = req.body || {};
 
     const baseUrl = getBaseUrl(req);
@@ -575,7 +603,9 @@ app.post("/api/render/preview", async (req, res) => {
         line3,
         leftLogoUrl,
         rightLogoUrl,
-        foreground
+        foreground,
+        fontFamilies,
+        textScale
       });
 
       const fileName = `${Date.now()}-${slugify(colorKey)}-${Math.random().toString(36).slice(2, 8)}.png`;
@@ -598,6 +628,60 @@ app.post("/api/render/preview", async (req, res) => {
   }
 });
 
+app.post("/api/render/single-preview", async (req, res) => {
+  try {
+    const {
+      line1 = "",
+      line2 = "",
+      line3 = "",
+      leftLogoUrl = null,
+      rightLogoUrl = null,
+      dimension = "100x25mm",
+      color = "",
+      fontFamilies = {},
+      textScale = {}
+    } = req.body || {};
+
+    const colorKey = normalizeColor(color);
+    const bgUrl = PLATE_BACKGROUNDS[colorKey];
+
+    if (!bgUrl) {
+      return res.status(404).json({ error: "Couleur introuvable." });
+    }
+
+    const foreground = FOREGROUND_BY_COLOR[colorKey] || "#111111";
+    const baseUrl = getBaseUrl(req);
+
+    const composedBuffer = await buildComposite({
+      backgroundUrl: bgUrl,
+      dimension,
+      line1,
+      line2,
+      line3,
+      leftLogoUrl,
+      rightLogoUrl,
+      foreground,
+      fontFamilies,
+      textScale
+    });
+
+    const fileName = `${Date.now()}-single-${slugify(colorKey)}-${Math.random().toString(36).slice(2, 8)}.png`;
+    const filePath = path.join(previewsDir, fileName);
+
+    fs.writeFileSync(filePath, composedBuffer);
+
+    return res.json({
+      color: colorKey,
+      url: `${baseUrl}/generated/previews/${fileName}`
+    });
+  } catch (error) {
+    console.error("Erreur /api/render/single-preview :", error);
+    return res.status(500).json({
+      error: error?.message || "Erreur interne aperçu simple."
+    });
+  }
+});
+
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
@@ -606,7 +690,9 @@ app.post("/api/render/production", async (req, res) => {
       line3 = "",
       dimension = "100x25mm",
       leftLogoUrl = null,
-      rightLogoUrl = null
+      rightLogoUrl = null,
+      fontFamilies = {},
+      textScale = {}
     } = req.body || {};
 
     const baseUrl = getBaseUrl(req);
@@ -619,7 +705,9 @@ app.post("/api/render/production", async (req, res) => {
       line3,
       leftLogoUrl,
       rightLogoUrl,
-      foreground: "#111111"
+      foreground: "#111111",
+      fontFamilies,
+      textScale
     });
 
     const fileName = `${Date.now()}-production-${Math.random().toString(36).slice(2, 8)}.png`;
@@ -652,9 +740,7 @@ app.post("/api/variant/resolve", async (req, res) => {
 
     const allowedThickness = ALLOWED_THICKNESS_BY_COLOR[color];
     if (!allowedThickness) {
-      return res.status(404).json({
-        error: "Couleur introuvable."
-      });
+      return res.status(404).json({ error: "Couleur introuvable." });
     }
 
     if (!allowedThickness.includes(thickness)) {
@@ -674,9 +760,7 @@ app.post("/api/variant/resolve", async (req, res) => {
     return res.json(found);
   } catch (error) {
     console.error("Erreur /api/variant/resolve :", error);
-    return res.status(500).json({
-      error: "Erreur interne variant."
-    });
+    return res.status(500).json({ error: "Erreur interne variant." });
   }
 });
 
