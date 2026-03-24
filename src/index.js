@@ -22,9 +22,11 @@ const openai = new OpenAI({
 
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
+const previewsDir = path.join(generatedDir, "previews");
 const productionDir = path.join(generatedDir, "production");
 
 fs.mkdirSync(logosDir, { recursive: true });
+fs.mkdirSync(previewsDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
 
 app.use("/generated", express.static(generatedDir));
@@ -87,6 +89,18 @@ function normalizeColor(value = "") {
   };
 
   return map[v] || v;
+}
+
+const DARK_FOREGROUND_COLORS = new Set([
+  "noir",
+  "noir-brillant",
+  "gris",
+  "noyer",
+  "rose"
+]);
+
+function getForegroundByColor(color) {
+  return DARK_FOREGROUND_COLORS.has(normalizeColor(color)) ? "#FFFFFF" : "#111111";
 }
 
 const ALLOWED_THICKNESS_BY_COLOR = {
@@ -249,16 +263,50 @@ async function fetchImageBuffer(url) {
   return Buffer.from(arrayBuffer);
 }
 
-async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
+function normalizeScale(value, fallback = 1) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0.4, Math.min(1.8, n));
+}
+
+function normalizeTextScale(textScale = {}) {
+  return {
+    line1: normalizeScale(textScale.line1, 1),
+    line2: normalizeScale(textScale.line2, 1),
+    line3: normalizeScale(textScale.line3, 1)
+  };
+}
+
+function normalizeLogoScale(logoScale = {}) {
+  return {
+    single: normalizeScale(logoScale.single, 1),
+    left: normalizeScale(logoScale.left, 1),
+    right: normalizeScale(logoScale.right, 1)
+  };
+}
+
+function escapeXml(str = "") {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+async function fitLogo(buffer, maxWidth, maxHeight, colorHex = "#111111", scale = 1) {
   const { r, g, b } = hexToRgb(colorHex);
+
+  const effectiveWidth = Math.max(1, Math.round(maxWidth * scale));
+  const effectiveHeight = Math.max(1, Math.round(maxHeight * scale));
 
   const resizedBuffer = await sharp(buffer)
     .ensureAlpha()
     .trim()
     .resize({
-      width: boxWidth,
-      height: boxHeight,
-      fit: "contain",
+      width: effectiveWidth,
+      height: effectiveHeight,
+      fit: "inside",
       withoutEnlargement: true,
       background: { r: 0, g: 0, b: 0, alpha: 0 }
     })
@@ -266,10 +314,21 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
     .toBuffer();
 
   const meta = await sharp(resizedBuffer).metadata();
-  const logoW = meta.width || boxWidth;
-  const logoH = meta.height || boxHeight;
+  const logoW = Math.min(meta.width || effectiveWidth, maxWidth);
+  const logoH = Math.min(meta.height || effectiveHeight, maxHeight);
 
-  const alpha = await sharp(resizedBuffer)
+  const finalLogo = await sharp(resizedBuffer)
+    .resize({
+      width: logoW,
+      height: logoH,
+      fit: "inside",
+      withoutEnlargement: true,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    })
+    .png()
+    .toBuffer();
+
+  const alpha = await sharp(finalLogo)
     .ensureAlpha()
     .extractChannel("alpha")
     .toBuffer();
@@ -286,13 +345,13 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
     .png()
     .toBuffer();
 
-  const left = Math.max(0, Math.round((boxWidth - logoW) / 2));
-  const top = Math.max(0, Math.round((boxHeight - logoH) / 2));
+  const left = Math.max(0, Math.round((maxWidth - logoW) / 2));
+  const top = Math.max(0, Math.round((maxHeight - logoH) / 2));
 
   return sharp({
     create: {
-      width: boxWidth,
-      height: boxHeight,
+      width: maxWidth,
+      height: maxHeight,
       channels: 4,
       background: { r: 0, g: 0, b: 0, alpha: 0 }
     }
@@ -302,36 +361,14 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
     .toBuffer();
 }
 
-function normalizeTextScale(textScale = {}) {
-  const parseScale = (value, fallback) => {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(1.8, Math.max(0.6, n));
-  };
-
-  return {
-    line1: parseScale(textScale.line1, 1),
-    line2: parseScale(textScale.line2, 1),
-    line3: parseScale(textScale.line3, 1)
-  };
-}
-
-function escapeXml(str = "") {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
-function buildProductionTextSvg({
+function buildTextSvg({
   width,
   height,
   line1 = "",
   line2 = "",
   line3 = "",
-  textScale = {}
+  textScale = {},
+  fill = "#111111"
 }) {
   const safe1 = escapeXml(line1);
   const safe2 = escapeXml(line2);
@@ -356,7 +393,7 @@ function buildProductionTextSvg({
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <style>
         .l1, .l2, .l3 {
-          fill: #111111;
+          fill: ${fill};
           font-family: Arial, sans-serif;
         }
         .l1 { font-size: ${font1}px; font-weight: 700; }
@@ -370,16 +407,96 @@ function buildProductionTextSvg({
   `);
 }
 
-async function buildProductionComposite({
+function getLayoutZones(width, height, hasLeft, hasRight) {
+  const usableHeight = Math.max(1, Math.round(height * 0.97));
+  const logoZoneWidth = Math.round(width * 0.25);
+  const textZoneWidthOneLogo = width - logoZoneWidth;
+  const textZoneWidthTwoLogos = Math.round(width * 0.50);
+
+  if (hasLeft && hasRight) {
+    return {
+      leftLogoBox: {
+        left: 0,
+        top: Math.round((height - usableHeight) / 2),
+        width: logoZoneWidth,
+        height: usableHeight
+      },
+      rightLogoBox: {
+        left: width - logoZoneWidth,
+        top: Math.round((height - usableHeight) / 2),
+        width: logoZoneWidth,
+        height: usableHeight
+      },
+      textBox: {
+        left: logoZoneWidth,
+        top: 0,
+        width: textZoneWidthTwoLogos,
+        height
+      }
+    };
+  }
+
+  if (hasLeft) {
+    return {
+      leftLogoBox: {
+        left: 0,
+        top: Math.round((height - usableHeight) / 2),
+        width: logoZoneWidth,
+        height: usableHeight
+      },
+      rightLogoBox: null,
+      textBox: {
+        left: logoZoneWidth,
+        top: 0,
+        width: textZoneWidthOneLogo,
+        height
+      }
+    };
+  }
+
+  if (hasRight) {
+    return {
+      leftLogoBox: null,
+      rightLogoBox: {
+        left: width - logoZoneWidth,
+        top: Math.round((height - usableHeight) / 2),
+        width: logoZoneWidth,
+        height: usableHeight
+      },
+      textBox: {
+        left: 0,
+        top: 0,
+        width: textZoneWidthOneLogo,
+        height
+      }
+    };
+  }
+
+  return {
+    leftLogoBox: null,
+    rightLogoBox: null,
+    textBox: {
+      left: 0,
+      top: 0,
+      width,
+      height
+    }
+  };
+}
+
+async function buildComposite({
   dimension = "100x25mm",
   line1 = "",
   line2 = "",
   line3 = "",
   leftLogoUrl = null,
   rightLogoUrl = null,
-  textScale = {}
+  textScale = {},
+  logoScale = {},
+  foreground = "#111111"
 }) {
   const { width, height } = getCanvasSize(dimension);
+  const scales = normalizeLogoScale(logoScale);
 
   const base = sharp({
     create: {
@@ -394,47 +511,56 @@ async function buildProductionComposite({
   const hasLeft = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
 
-  const logoBoxWidth = Math.round(width * 0.25);
-  const logoBoxHeight = Math.round(height * 0.76);
-  const sideMargin = Math.round(width * 0.02);
+  const zones = getLayoutZones(width, height, hasLeft, hasRight);
 
-  const textZoneLeft = hasLeft ? Math.round(width * 0.26) : Math.round(width * 0.05);
-  const textZoneRight = hasRight ? Math.round(width * 0.26) : Math.round(width * 0.05);
-  const textZoneWidth = width - textZoneLeft - textZoneRight;
-
-  if (leftLogoUrl) {
+  if (leftLogoUrl && zones.leftLogoBox) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(leftLogoBuffer, logoBoxWidth, logoBoxHeight, "#111111");
+    const preparedLeftLogo = await fitLogo(
+      leftLogoBuffer,
+      zones.leftLogoBox.width,
+      zones.leftLogoBox.height,
+      foreground,
+      hasRight ? scales.left : scales.single
+    );
+
     composites.push({
       input: preparedLeftLogo,
-      left: sideMargin,
-      top: Math.round((height - logoBoxHeight) / 2)
+      left: zones.leftLogoBox.left,
+      top: zones.leftLogoBox.top
     });
   }
 
-  if (rightLogoUrl) {
+  if (rightLogoUrl && zones.rightLogoBox) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(rightLogoBuffer, logoBoxWidth, logoBoxHeight, "#111111");
+    const preparedRightLogo = await fitLogo(
+      rightLogoBuffer,
+      zones.rightLogoBox.width,
+      zones.rightLogoBox.height,
+      foreground,
+      hasLeft ? scales.right : scales.single
+    );
+
     composites.push({
       input: preparedRightLogo,
-      left: width - logoBoxWidth - sideMargin,
-      top: Math.round((height - logoBoxHeight) / 2)
+      left: zones.rightLogoBox.left,
+      top: zones.rightLogoBox.top
     });
   }
 
-  const textSvg = buildProductionTextSvg({
-    width: textZoneWidth,
-    height,
+  const textSvg = buildTextSvg({
+    width: zones.textBox.width,
+    height: zones.textBox.height,
     line1,
     line2,
     line3,
-    textScale
+    textScale,
+    fill: foreground
   });
 
   composites.push({
     input: textSvg,
-    left: textZoneLeft,
-    top: 0
+    left: zones.textBox.left,
+    top: zones.textBox.top
   });
 
   return base.composite(composites).png().toBuffer();
@@ -500,6 +626,49 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
   }
 });
 
+app.post("/api/render/preview", async (req, res) => {
+  try {
+    const {
+      line1 = "",
+      line2 = "",
+      line3 = "",
+      dimension = "100x25mm",
+      color = "acier-brosse",
+      leftLogoUrl = null,
+      rightLogoUrl = null,
+      textScale = {},
+      logoScale = {}
+    } = req.body || {};
+
+    const baseUrl = getBaseUrl(req);
+    const previewBuffer = await buildComposite({
+      dimension,
+      line1,
+      line2,
+      line3,
+      leftLogoUrl,
+      rightLogoUrl,
+      textScale,
+      logoScale,
+      foreground: getForegroundByColor(color)
+    });
+
+    const fileName = `${Date.now()}-preview-${Math.random().toString(36).slice(2, 8)}.png`;
+    const filePath = path.join(previewsDir, fileName);
+
+    fs.writeFileSync(filePath, previewBuffer);
+
+    return res.json({
+      url: `${baseUrl}/generated/previews/${fileName}`
+    });
+  } catch (error) {
+    console.error("Erreur /api/render/preview :", error);
+    return res.status(500).json({
+      error: error?.message || "Erreur interne génération preview."
+    });
+  }
+});
+
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
@@ -509,19 +678,22 @@ app.post("/api/render/production", async (req, res) => {
       dimension = "100x25mm",
       leftLogoUrl = null,
       rightLogoUrl = null,
-      textScale = {}
+      textScale = {},
+      logoScale = {}
     } = req.body || {};
 
     const baseUrl = getBaseUrl(req);
 
-    const productionBuffer = await buildProductionComposite({
+    const productionBuffer = await buildComposite({
       dimension,
       line1,
       line2,
       line3,
       leftLogoUrl,
       rightLogoUrl,
-      textScale
+      textScale,
+      logoScale,
+      foreground: "#111111"
     });
 
     const fileName = `${Date.now()}-production-${Math.random().toString(36).slice(2, 8)}.png`;
