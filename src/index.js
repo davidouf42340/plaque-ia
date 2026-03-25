@@ -23,6 +23,7 @@ const openai = new OpenAI({
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
 const productionDir = path.join(generatedDir, "production");
+const fontsDir = path.join(__dirname, "..", "fonts");
 
 fs.mkdirSync(logosDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
@@ -100,6 +101,8 @@ const ALLOWED_THICKNESS_BY_COLOR = {
   "noyer": ["1.6"],
   "rose": ["1.6"]
 };
+
+const WHITE_ELEMENTS = ["noir", "noir-brillant", "gris", "noyer", "rose"];
 
 const DIMENSION_MAP = {
   "100x25mm": { width: 1181, height: 295 },
@@ -249,50 +252,20 @@ async function fetchImageBuffer(url) {
   return Buffer.from(arrayBuffer);
 }
 
-function normalizeScale(value, fallback = 1) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(0.4, Math.min(1.8, n));
+function getElementColor(color = "blanc") {
+  return WHITE_ELEMENTS.includes(normalizeColor(color)) ? "#ffffff" : "#111111";
 }
 
-function normalizeTextScale(textScale = {}) {
-  return {
-    line1: normalizeScale(textScale.line1, 1),
-    line2: normalizeScale(textScale.line2, 1),
-    line3: normalizeScale(textScale.line3, 1)
-  };
-}
-
-function normalizeLogoScale(logoScale = {}) {
-  return {
-    single: normalizeScale(logoScale.single, 1),
-    left: normalizeScale(logoScale.left, 1),
-    right: normalizeScale(logoScale.right, 1)
-  };
-}
-
-function escapeXml(str = "") {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
-async function fitLogo(buffer, maxWidth, maxHeight, colorHex = "#111111", scale = 1) {
+async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
   const { r, g, b } = hexToRgb(colorHex);
-
-  const effectiveWidth = Math.max(1, Math.round(maxWidth * scale));
-  const effectiveHeight = Math.max(1, Math.round(maxHeight * scale));
 
   const resizedBuffer = await sharp(buffer)
     .ensureAlpha()
     .trim()
     .resize({
-      width: effectiveWidth,
-      height: effectiveHeight,
-      fit: "inside",
+      width: boxWidth,
+      height: boxHeight,
+      fit: "contain",
       withoutEnlargement: true,
       background: { r: 0, g: 0, b: 0, alpha: 0 }
     })
@@ -300,21 +273,10 @@ async function fitLogo(buffer, maxWidth, maxHeight, colorHex = "#111111", scale 
     .toBuffer();
 
   const meta = await sharp(resizedBuffer).metadata();
-  const logoW = Math.min(meta.width || effectiveWidth, maxWidth);
-  const logoH = Math.min(meta.height || effectiveHeight, maxHeight);
+  const logoW = meta.width || boxWidth;
+  const logoH = meta.height || boxHeight;
 
-  const finalLogo = await sharp(resizedBuffer)
-    .resize({
-      width: logoW,
-      height: logoH,
-      fit: "inside",
-      withoutEnlargement: true,
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    })
-    .png()
-    .toBuffer();
-
-  const alpha = await sharp(finalLogo)
+  const alpha = await sharp(resizedBuffer)
     .ensureAlpha()
     .extractChannel("alpha")
     .toBuffer();
@@ -331,13 +293,13 @@ async function fitLogo(buffer, maxWidth, maxHeight, colorHex = "#111111", scale 
     .png()
     .toBuffer();
 
-  const left = Math.max(0, Math.round((maxWidth - logoW) / 2));
-  const top = Math.max(0, Math.round((maxHeight - logoH) / 2));
+  const left = Math.max(0, Math.round((boxWidth - logoW) / 2));
+  const top = Math.max(0, Math.round((boxHeight - logoH) / 2));
 
   return sharp({
     create: {
-      width: maxWidth,
-      height: maxHeight,
+      width: boxWidth,
+      height: boxHeight,
       channels: 4,
       background: { r: 0, g: 0, b: 0, alpha: 0 }
     }
@@ -347,13 +309,86 @@ async function fitLogo(buffer, maxWidth, maxHeight, colorHex = "#111111", scale 
     .toBuffer();
 }
 
+function normalizeTextScale(textScale = {}) {
+  const parseScale = (value, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(1.8, Math.max(0.6, n));
+  };
+
+  return {
+    line1: parseScale(textScale.line1, 1),
+    line2: parseScale(textScale.line2, 1),
+    line3: parseScale(textScale.line3, 1)
+  };
+}
+
+function normalizeLogoScale(logoScale = {}) {
+  const parseScale = (value, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(1.0, Math.max(0.4, n));
+  };
+
+  return {
+    single: parseScale(logoScale.single, 1),
+    left: parseScale(logoScale.left, 1),
+    right: parseScale(logoScale.right, 1)
+  };
+}
+
+function escapeXml(str = "") {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function getAdaptiveFontSize(baseSize, text = "", maxChars = 18) {
+  const len = String(text || "").length;
+  let ratio = 1;
+  if (len > maxChars) ratio = maxChars / len;
+  return Math.max(Math.round(baseSize * ratio), Math.round(baseSize * 0.5));
+}
+
+function getFontFamily(fontKey = "sans") {
+  const map = {
+    sans: "Arial Black, Arial, sans-serif",
+    serif: "Georgia, serif",
+    mono: "Courier New, monospace",
+    design: "Trebuchet MS, Verdana, sans-serif",
+    script: "ScriptCustom, cursive"
+  };
+  return map[fontKey] || map.sans;
+}
+
+function getFontFileCss() {
+  const scriptFontPath = path.join(fontsDir, "script.ttf");
+  if (fs.existsSync(scriptFontPath)) {
+    const fileUrl = `file://${scriptFontPath.replace(/\\/g, "/")}`;
+    return `
+      @font-face {
+        font-family: 'ScriptCustom';
+        src: url('${fileUrl}') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+      }
+    `;
+  }
+  return "";
+}
+
 function buildProductionTextSvg({
   width,
   height,
   line1 = "",
   line2 = "",
   line3 = "",
-  textScale = {}
+  textScale = {},
+  fontFamilies = {},
+  colorHex = "#111111"
 }) {
   const safe1 = escapeXml(line1);
   const safe2 = escapeXml(line2);
@@ -365,122 +400,60 @@ function buildProductionTextSvg({
   const base2 = Math.round(height * 0.24);
   const base3 = Math.round(height * 0.18);
 
-  const font1 = Math.max(14, Math.round(base1 * scales.line1));
-  const font2 = Math.max(12, Math.round(base2 * scales.line2));
-  const font3 = Math.max(10, Math.round(base3 * scales.line3));
+  const font1 = getAdaptiveFontSize(Math.round(base1 * scales.line1), line1, 18);
+  const font2 = getAdaptiveFontSize(Math.round(base2 * scales.line2), line2, 22);
+  const font3 = getAdaptiveFontSize(Math.round(base3 * scales.line3), line3, 26);
 
-  const x = Math.round(width / 2);
   const y1 = Math.round(height * 0.28);
   const y2 = Math.round(height * 0.57);
   const y3 = Math.round(height * 0.82);
 
   return Buffer.from(`
-    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <style>
+        ${getFontFileCss()}
         .l1, .l2, .l3 {
-          fill: #111111;
-          font-family: "DejaVu Sans", "Liberation Sans", sans-serif;
+          fill: ${colorHex};
+          text-anchor: middle;
+          dominant-baseline: middle;
         }
-        .l1 { font-size: ${font1}px; font-weight: 700; }
-        .l2 { font-size: ${font2}px; font-weight: 600; }
-        .l3 { font-size: ${font3}px; font-weight: 600; }
+        .l1 {
+          font-family: ${getFontFamily(fontFamilies.line1)};
+          font-size: ${font1}px;
+          font-weight: 700;
+        }
+        .l2 {
+          font-family: ${getFontFamily(fontFamilies.line2)};
+          font-size: ${font2}px;
+          font-weight: 600;
+        }
+        .l3 {
+          font-family: ${getFontFamily(fontFamilies.line3)};
+          font-size: ${font3}px;
+          font-weight: 600;
+        }
       </style>
-      ${safe1 ? `<text x="${x}" y="${y1}" text-anchor="middle" class="l1">${safe1}</text>` : ""}
-      ${safe2 ? `<text x="${x}" y="${y2}" text-anchor="middle" class="l2">${safe2}</text>` : ""}
-      ${safe3 ? `<text x="${x}" y="${y3}" text-anchor="middle" class="l3">${safe3}</text>` : ""}
+      ${safe1 ? `<text x="${Math.round(width / 2)}" y="${y1}" class="l1">${safe1}</text>` : ""}
+      ${safe2 ? `<text x="${Math.round(width / 2)}" y="${y2}" class="l2">${safe2}</text>` : ""}
+      ${safe3 ? `<text x="${Math.round(width / 2)}" y="${y3}" class="l3">${safe3}</text>` : ""}
     </svg>
   `);
 }
 
-function getLayoutZones(width, height, hasLeft, hasRight) {
-  const usableHeight = Math.max(1, Math.round(height * 0.97));
-  const logoZoneWidth = Math.round(width * 0.25);
-  const textZoneWidthOneLogo = width - logoZoneWidth;
-  const textZoneWidthTwoLogos = Math.round(width * 0.50);
-
-  if (hasLeft && hasRight) {
-    return {
-      leftLogoBox: {
-        left: 0,
-        top: Math.round((height - usableHeight) / 2),
-        width: logoZoneWidth,
-        height: usableHeight
-      },
-      rightLogoBox: {
-        left: width - logoZoneWidth,
-        top: Math.round((height - usableHeight) / 2),
-        width: logoZoneWidth,
-        height: usableHeight
-      },
-      textBox: {
-        left: logoZoneWidth,
-        top: 0,
-        width: textZoneWidthTwoLogos,
-        height
-      }
-    };
-  }
-
-  if (hasLeft) {
-    return {
-      leftLogoBox: {
-        left: 0,
-        top: Math.round((height - usableHeight) / 2),
-        width: logoZoneWidth,
-        height: usableHeight
-      },
-      rightLogoBox: null,
-      textBox: {
-        left: logoZoneWidth,
-        top: 0,
-        width: textZoneWidthOneLogo,
-        height
-      }
-    };
-  }
-
-  if (hasRight) {
-    return {
-      leftLogoBox: null,
-      rightLogoBox: {
-        left: width - logoZoneWidth,
-        top: Math.round((height - usableHeight) / 2),
-        width: logoZoneWidth,
-        height: usableHeight
-      },
-      textBox: {
-        left: 0,
-        top: 0,
-        width: textZoneWidthOneLogo,
-        height
-      }
-    };
-  }
-
-  return {
-    leftLogoBox: null,
-    rightLogoBox: null,
-    textBox: {
-      left: 0,
-      top: 0,
-      width,
-      height
-    }
-  };
-}
-
 async function buildProductionComposite({
   dimension = "100x25mm",
+  color = "blanc",
   line1 = "",
   line2 = "",
   line3 = "",
   leftLogoUrl = null,
   rightLogoUrl = null,
   textScale = {},
-  logoScale = {}
+  logoScale = {},
+  fontFamilies = {}
 }) {
   const { width, height } = getCanvasSize(dimension);
-  const scales = normalizeLogoScale(logoScale);
+  const elementColor = getElementColor(color);
 
   const base = sharp({
     create: {
@@ -494,55 +467,71 @@ async function buildProductionComposite({
   const composites = [];
   const hasLeft = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
-  const zones = getLayoutZones(width, height, hasLeft, hasRight);
 
-  if (leftLogoUrl && zones.leftLogoBox) {
+  const logoScales = normalizeLogoScale(logoScale);
+
+  const leftScale = hasRight ? logoScales.left : logoScales.single;
+  const rightScale = hasLeft ? logoScales.right : logoScales.single;
+
+  const leftLogoWidth = Math.round(width * 0.25 * leftScale);
+  const rightLogoWidth = Math.round(width * 0.25 * rightScale);
+  const logoBoxHeight = Math.round(height * 0.97);
+
+  let textZoneLeft = 0;
+  let textZoneWidth = width;
+
+  if (hasLeft && !hasRight) {
+    textZoneLeft = Math.round(width * 0.25);
+    textZoneWidth = width - textZoneLeft;
+  }
+
+  if (!hasLeft && hasRight) {
+    textZoneLeft = 0;
+    textZoneWidth = width - Math.round(width * 0.25);
+  }
+
+  if (hasLeft && hasRight) {
+    textZoneLeft = Math.round(width * 0.25);
+    textZoneWidth = Math.round(width * 0.50);
+  }
+
+  if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(
-      leftLogoBuffer,
-      zones.leftLogoBox.width,
-      zones.leftLogoBox.height,
-      "#111111",
-      hasRight ? scales.left : scales.single
-    );
+    const preparedLeftLogo = await fitLogo(leftLogoBuffer, leftLogoWidth, logoBoxHeight, elementColor);
 
     composites.push({
       input: preparedLeftLogo,
-      left: zones.leftLogoBox.left,
-      top: zones.leftLogoBox.top
+      left: 0,
+      top: Math.round((height - logoBoxHeight) / 2)
     });
   }
 
-  if (rightLogoUrl && zones.rightLogoBox) {
+  if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(
-      rightLogoBuffer,
-      zones.rightLogoBox.width,
-      zones.rightLogoBox.height,
-      "#111111",
-      hasLeft ? scales.right : scales.single
-    );
+    const preparedRightLogo = await fitLogo(rightLogoBuffer, rightLogoWidth, logoBoxHeight, elementColor);
 
     composites.push({
       input: preparedRightLogo,
-      left: zones.rightLogoBox.left,
-      top: zones.rightLogoBox.top
+      left: width - rightLogoWidth,
+      top: Math.round((height - logoBoxHeight) / 2)
     });
   }
 
   const textSvg = buildProductionTextSvg({
-    width: zones.textBox.width,
-    height: zones.textBox.height,
+    width: textZoneWidth,
+    height,
     line1,
     line2,
     line3,
-    textScale
+    textScale,
+    fontFamilies,
+    colorHex: elementColor
   });
 
   composites.push({
     input: textSvg,
-    left: zones.textBox.left,
-    top: zones.textBox.top
+    left: textZoneLeft,
+    top: 0
   });
 
   return base.composite(composites).png().toBuffer();
@@ -615,26 +604,31 @@ app.post("/api/render/production", async (req, res) => {
       line2 = "",
       line3 = "",
       dimension = "100x25mm",
+      thickness = "1.6",
+      color = "blanc",
       leftLogoUrl = null,
       rightLogoUrl = null,
       textScale = {},
-      logoScale = {}
+      logoScale = {},
+      fontFamilies = {}
     } = req.body || {};
 
     const baseUrl = getBaseUrl(req);
 
     const productionBuffer = await buildProductionComposite({
       dimension,
+      color,
       line1,
       line2,
       line3,
       leftLogoUrl,
       rightLogoUrl,
       textScale,
-      logoScale
+      logoScale,
+      fontFamilies
     });
 
-    const fileName = `${Date.now()}-production-${Math.random().toString(36).slice(2, 8)}.png`;
+    const fileName = `${Date.now()}-production-${slugify(dimension)}-${slugify(color)}-${normalizeThickness(thickness)}-${Math.random().toString(36).slice(2, 8)}.png`;
     const filePath = path.join(productionDir, fileName);
 
     fs.writeFileSync(filePath, productionBuffer);
