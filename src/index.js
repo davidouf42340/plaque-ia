@@ -5,8 +5,6 @@ import path from "path";
 import OpenAI from "openai";
 import sharp from "sharp";
 import { fileURLToPath } from "url";
-import fs from "fs";
-import path from "path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +23,7 @@ const openai = new OpenAI({
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
 const productionDir = path.join(generatedDir, "production");
-const fontsDir = path.join(__dirname, "..", "fonts");
+const fontsDir = path.join(__dirname, "fonts");
 
 fs.mkdirSync(logosDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
@@ -366,20 +364,24 @@ function getFontFamily(fontKey = "sans") {
   return map[fontKey] || map.sans;
 }
 
-function getFontFileCss() {
-  const scriptFontPath = path.join(fontsDir, "script.ttf");
-  if (fs.existsSync(scriptFontPath)) {
-    const fileUrl = `file://${scriptFontPath.replace(/\\/g, "/")}`;
-    return `
+function getFontFaceCss() {
+  const scriptPath = path.join(fontsDir, "script.ttf");
+
+  const blocks = [];
+
+  if (fs.existsSync(scriptPath)) {
+    const scriptUrl = `file://${scriptPath.replace(/\\/g, "/")}`;
+    blocks.push(`
       @font-face {
         font-family: 'ScriptCustom';
-        src: url('${fileUrl}') format('truetype');
+        src: url('${scriptUrl}') format('truetype');
         font-weight: normal;
         font-style: normal;
       }
-    `;
+    `);
   }
-  return "";
+
+  return blocks.join("\n");
 }
 
 function buildProductionTextSvg({
@@ -413,7 +415,7 @@ function buildProductionTextSvg({
   return Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <style>
-        ${getFontFileCss()}
+        ${getFontFaceCss()}
         .l1, .l2, .l3 {
           fill: ${colorHex};
           text-anchor: middle;
@@ -690,4 +692,6 @@ app.post("/api/variant/resolve", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log("Fonts dir:", fontsDir);
+  console.log("Script font exists:", fs.existsSync(path.join(fontsDir, "script.ttf")));
 });
