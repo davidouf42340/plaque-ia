@@ -22,11 +22,9 @@ const openai = new OpenAI({
 
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
-const previewsDir = path.join(generatedDir, "previews");
 const productionDir = path.join(generatedDir, "production");
 
 fs.mkdirSync(logosDir, { recursive: true });
-fs.mkdirSync(previewsDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
 
 app.use("/generated", express.static(generatedDir));
@@ -89,18 +87,6 @@ function normalizeColor(value = "") {
   };
 
   return map[v] || v;
-}
-
-const DARK_FOREGROUND_COLORS = new Set([
-  "noir",
-  "noir-brillant",
-  "gris",
-  "noyer",
-  "rose"
-]);
-
-function getForegroundByColor(color) {
-  return DARK_FOREGROUND_COLORS.has(normalizeColor(color)) ? "#FFFFFF" : "#111111";
 }
 
 const ALLOWED_THICKNESS_BY_COLOR = {
@@ -361,14 +347,13 @@ async function fitLogo(buffer, maxWidth, maxHeight, colorHex = "#111111", scale 
     .toBuffer();
 }
 
-function buildTextSvg({
+function buildProductionTextSvg({
   width,
   height,
   line1 = "",
   line2 = "",
   line3 = "",
-  textScale = {},
-  fill = "#111111"
+  textScale = {}
 }) {
   const safe1 = escapeXml(line1);
   const safe2 = escapeXml(line2);
@@ -390,11 +375,11 @@ function buildTextSvg({
   const y3 = Math.round(height * 0.82);
 
   return Buffer.from(`
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
       <style>
         .l1, .l2, .l3 {
-          fill: ${fill};
-          font-family: Arial, sans-serif;
+          fill: #111111;
+          font-family: "DejaVu Sans", "Liberation Sans", sans-serif;
         }
         .l1 { font-size: ${font1}px; font-weight: 700; }
         .l2 { font-size: ${font2}px; font-weight: 600; }
@@ -484,7 +469,7 @@ function getLayoutZones(width, height, hasLeft, hasRight) {
   };
 }
 
-async function buildComposite({
+async function buildProductionComposite({
   dimension = "100x25mm",
   line1 = "",
   line2 = "",
@@ -492,8 +477,7 @@ async function buildComposite({
   leftLogoUrl = null,
   rightLogoUrl = null,
   textScale = {},
-  logoScale = {},
-  foreground = "#111111"
+  logoScale = {}
 }) {
   const { width, height } = getCanvasSize(dimension);
   const scales = normalizeLogoScale(logoScale);
@@ -510,7 +494,6 @@ async function buildComposite({
   const composites = [];
   const hasLeft = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
-
   const zones = getLayoutZones(width, height, hasLeft, hasRight);
 
   if (leftLogoUrl && zones.leftLogoBox) {
@@ -519,7 +502,7 @@ async function buildComposite({
       leftLogoBuffer,
       zones.leftLogoBox.width,
       zones.leftLogoBox.height,
-      foreground,
+      "#111111",
       hasRight ? scales.left : scales.single
     );
 
@@ -536,7 +519,7 @@ async function buildComposite({
       rightLogoBuffer,
       zones.rightLogoBox.width,
       zones.rightLogoBox.height,
-      foreground,
+      "#111111",
       hasLeft ? scales.right : scales.single
     );
 
@@ -547,14 +530,13 @@ async function buildComposite({
     });
   }
 
-  const textSvg = buildTextSvg({
+  const textSvg = buildProductionTextSvg({
     width: zones.textBox.width,
     height: zones.textBox.height,
     line1,
     line2,
     line3,
-    textScale,
-    fill: foreground
+    textScale
   });
 
   composites.push({
@@ -626,49 +608,6 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
   }
 });
 
-app.post("/api/render/preview", async (req, res) => {
-  try {
-    const {
-      line1 = "",
-      line2 = "",
-      line3 = "",
-      dimension = "100x25mm",
-      color = "acier-brosse",
-      leftLogoUrl = null,
-      rightLogoUrl = null,
-      textScale = {},
-      logoScale = {}
-    } = req.body || {};
-
-    const baseUrl = getBaseUrl(req);
-    const previewBuffer = await buildComposite({
-      dimension,
-      line1,
-      line2,
-      line3,
-      leftLogoUrl,
-      rightLogoUrl,
-      textScale,
-      logoScale,
-      foreground: getForegroundByColor(color)
-    });
-
-    const fileName = `${Date.now()}-preview-${Math.random().toString(36).slice(2, 8)}.png`;
-    const filePath = path.join(previewsDir, fileName);
-
-    fs.writeFileSync(filePath, previewBuffer);
-
-    return res.json({
-      url: `${baseUrl}/generated/previews/${fileName}`
-    });
-  } catch (error) {
-    console.error("Erreur /api/render/preview :", error);
-    return res.status(500).json({
-      error: error?.message || "Erreur interne génération preview."
-    });
-  }
-});
-
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
@@ -684,7 +623,7 @@ app.post("/api/render/production", async (req, res) => {
 
     const baseUrl = getBaseUrl(req);
 
-    const productionBuffer = await buildComposite({
+    const productionBuffer = await buildProductionComposite({
       dimension,
       line1,
       line2,
@@ -692,8 +631,7 @@ app.post("/api/render/production", async (req, res) => {
       leftLogoUrl,
       rightLogoUrl,
       textScale,
-      logoScale,
-      foreground: "#111111"
+      logoScale
     });
 
     const fileName = `${Date.now()}-production-${Math.random().toString(36).slice(2, 8)}.png`;
