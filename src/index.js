@@ -17,7 +17,6 @@ const allowedOrigins = [
   "https://simulateur-pag.up.railway.app"
 ];
 
-// CORS robuste pour Shopify + Railway
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
@@ -402,7 +401,6 @@ function getFontFamily(fontKey = "sans") {
 
 function getFontFaceCss() {
   const scriptPath = path.join(fontsDir, "script.ttf");
-
   const blocks = [];
 
   if (fs.existsSync(scriptPath)) {
@@ -585,6 +583,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 
     if (!cleanPrompt) {
       return res.status(400).json({
+        code: "MISSING_PROMPT",
         error: "Prompt image manquant."
       });
     }
@@ -630,9 +629,53 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 
     return res.json({ logos });
   } catch (error) {
-    console.error("Erreur /api/logos/search-or-generate :", error);
+    console.error("Erreur /api/logos/search-or-generate :");
+    console.error("message:", error?.message);
+    console.error("status:", error?.status);
+    console.error("name:", error?.name);
+    console.error("stack:", error?.stack);
+    console.error("full error:", error);
+
+    const rawMessage = String(error?.message || "").toLowerCase();
+    const status = Number(error?.status || 500);
+
+    if (
+      status === 429 ||
+      rawMessage.includes("rate limit") ||
+      rawMessage.includes("too many requests")
+    ) {
+      return res.status(429).json({
+        code: "RATE_LIMIT",
+        error: "La génération d’images est momentanément très sollicitée. Merci de réessayer dans quelques secondes."
+      });
+    }
+
+    if (
+      rawMessage.includes("quota") ||
+      rawMessage.includes("billing") ||
+      rawMessage.includes("insufficient") ||
+      rawMessage.includes("credit")
+    ) {
+      return res.status(503).json({
+        code: "BILLING_UNAVAILABLE",
+        error: "Le service de génération d’images est momentanément indisponible."
+      });
+    }
+
+    if (
+      rawMessage.includes("api key") ||
+      rawMessage.includes("unauthorized") ||
+      status === 401
+    ) {
+      return res.status(503).json({
+        code: "AUTH_ERROR",
+        error: "Le service de génération d’images est momentanément indisponible."
+      });
+    }
+
     return res.status(500).json({
-      error: error?.message || "Erreur interne génération images."
+      code: "GENERIC_GENERATION_ERROR",
+      error: "Une erreur est survenue lors de la génération des images. Merci de réessayer."
     });
   }
 });
@@ -730,4 +773,5 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log("Fonts dir:", fontsDir);
   console.log("Script font exists:", fs.existsSync(path.join(fontsDir, "script.ttf")));
+  console.log("OPENAI_API_KEY présente :", !!process.env.OPENAI_API_KEY);
 });
