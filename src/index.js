@@ -11,41 +11,17 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+app.use(cors({
+  origin: true
+}));
+
+app.use(express.json({ limit: "20mb" }));
+
 const allowedOrigins = [
   "https://www.plaquesagraver.fr",
   "https://plaquesagraver.fr",
   "https://simulateur-pag.up.railway.app"
 ];
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (origin && allowedOrigins.includes(origin)) {
-    res.header("Access-Control-Allow-Origin", origin);
-  }
-
-  res.header("Vary", "Origin");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Credentials", "true");
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
-  next();
-});
-
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`Origin non autorisée par CORS: ${origin}`));
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
 
 app.use(express.json({ limit: "20mb" }));
 
