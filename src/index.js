@@ -768,6 +768,63 @@ app.post("/api/variant/resolve", async (req, res) => {
     });
   }
 });
+app.get("/api/gallery/random", async (req, res) => {
+  try {
+    const baseUrl = getBaseUrl(req);
+
+    const files = fs.readdirSync(logosDir)
+      .filter(f => f.endsWith(".png"));
+
+    if (files.length === 0) {
+      return res.json({ items: [] });
+    }
+
+    const getRandom = () => files[Math.floor(Math.random() * files.length)];
+
+    const items = [];
+
+    for (let i = 0; i < 12; i++) {
+      const left = getRandom();
+      const right = Math.random() > 0.5 ? getRandom() : null;
+
+      const leftUrl = `${baseUrl}/generated/logos/${left}`;
+      const rightUrl = right ? `${baseUrl}/generated/logos/${right}` : null;
+
+      const colors = ["noir", "blanc", "acier-brosse", "or", "cuivre"];
+      const dimensions = ["100x25mm", "150x37mm", "200x50mm"];
+
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const dimension = dimensions[Math.floor(Math.random() * dimensions.length)];
+
+      const buffer = await buildProductionComposite({
+        dimension,
+        color,
+        line1: "VOTRE TEXTE",
+        line2: "ICI",
+        line3: "",
+        leftLogoUrl: leftUrl,
+        rightLogoUrl: rightUrl
+      });
+
+      const fileName = `gallery-${Date.now()}-${i}.png`;
+      const filePath = path.join(productionDir, fileName);
+
+      fs.writeFileSync(filePath, buffer);
+
+      items.push({
+        preview: `${baseUrl}/generated/production/${fileName}`,
+        leftLogo: leftUrl,
+        rightLogo: rightUrl
+      });
+    }
+
+    res.json({ items });
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "gallery error" });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
