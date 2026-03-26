@@ -772,10 +772,15 @@ app.get("/api/gallery/random", async (req, res) => {
   try {
     const baseUrl = getBaseUrl(req);
 
-    const files = fs.readdirSync(logosDir)
-      .filter(f => f.endsWith(".png"));
+    if (!fs.existsSync(logosDir)) {
+      return res.json({ items: [] });
+    }
 
-    if (files.length === 0) {
+    const files = fs.readdirSync(logosDir).filter(f => f.endsWith(".png"));
+
+    console.log("Gallery logos:", files.length);
+
+    if (!files.length) {
       return res.json({ items: [] });
     }
 
@@ -783,45 +788,48 @@ app.get("/api/gallery/random", async (req, res) => {
 
     const items = [];
 
-    for (let i = 0; i < 12; i++) {
-      const left = getRandom();
-      const right = Math.random() > 0.5 ? getRandom() : null;
+    // 🔥 important : limiter pour éviter crash serveur
+    const LIMIT = 6;
 
-      const leftUrl = `${baseUrl}/generated/logos/${left}`;
-      const rightUrl = right ? `${baseUrl}/generated/logos/${right}` : null;
+    for (let i = 0; i < LIMIT; i++) {
+      try {
+        const left = getRandom();
+        const right = Math.random() > 0.5 ? getRandom() : null;
 
-      const colors = ["noir", "blanc", "acier-brosse", "or", "cuivre"];
-      const dimensions = ["100x25mm", "150x37mm", "200x50mm"];
+        const leftUrl = `${baseUrl}/generated/logos/${left}`;
+        const rightUrl = right ? `${baseUrl}/generated/logos/${right}` : null;
 
-      const color = colors[Math.floor(Math.random() * colors.length)];
-      const dimension = dimensions[Math.floor(Math.random() * dimensions.length)];
+        // ⚠️ on utilise TON moteur existant (inchangé)
+        const buffer = await buildProductionComposite({
+          dimension: "150x37mm",
+          color: "blanc",
+          line1: "VOTRE TEXTE",
+          line2: "ICI",
+          line3: "",
+          leftLogoUrl: leftUrl,
+          rightLogoUrl: rightUrl
+        });
 
-      const buffer = await buildProductionComposite({
-        dimension,
-        color,
-        line1: "VOTRE TEXTE",
-        line2: "ICI",
-        line3: "",
-        leftLogoUrl: leftUrl,
-        rightLogoUrl: rightUrl
-      });
+        const fileName = `gallery-${Date.now()}-${i}.png`;
+        const filePath = path.join(productionDir, fileName);
 
-      const fileName = `gallery-${Date.now()}-${i}.png`;
-      const filePath = path.join(productionDir, fileName);
+        fs.writeFileSync(filePath, buffer);
 
-      fs.writeFileSync(filePath, buffer);
+        items.push({
+          preview: `${baseUrl}/generated/production/${fileName}`,
+          leftLogo: leftUrl,
+          rightLogo: rightUrl
+        });
 
-      items.push({
-        preview: `${baseUrl}/generated/production/${fileName}`,
-        leftLogo: leftUrl,
-        rightLogo: rightUrl
-      });
+      } catch (err) {
+        console.error("Erreur item gallery:", err);
+      }
     }
 
     res.json({ items });
 
   } catch (e) {
-    console.error(e);
+    console.error("Erreur gallery globale:", e);
     res.status(500).json({ error: "gallery error" });
   }
 });
