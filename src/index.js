@@ -17,14 +17,6 @@ app.use(cors({
 
 app.use(express.json({ limit: "20mb" }));
 
-const allowedOrigins = [
-  "https://www.plaquesagraver.fr",
-  "https://plaquesagraver.fr",
-  "https://simulateur-pag.up.railway.app"
-];
-
-app.use(express.json({ limit: "20mb" }));
-
 const PORT = process.env.PORT || 3000;
 
 const openai = new OpenAI({
@@ -551,6 +543,147 @@ async function buildProductionComposite({
   return base.composite(composites).png().toBuffer();
 }
 
+// =======================
+// SHOPIFY UPLOAD
+// =======================
+
+async function shopifyGraphQL(query, variables = {}) {
+  const shop = process.env.SHOPIFY_STORE;
+  const token = process.env.SHOPIFY_ADMIN_TOKEN;
+  const version = process.env.SHOPIFY_API_VERSION || "2025-01";
+
+  if (!shop || !token) {
+    throw new Error("Variables Shopify manquantes : SHOPIFY_STORE ou SHOPIFY_ADMIN_TOKEN");
+  }
+
+  const url = `https://${shop}/admin/api/${version}/graphql.json`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": token
+    },
+    body: JSON.stringify({ query, variables })
+  });
+
+  const data = await res.json();
+
+  if (!res.ok || data.errors) {
+    console.error("Shopify GraphQL error:", JSON.stringify(data, null, 2));
+    throw new Error("Erreur GraphQL Shopify");
+  }
+
+  return data.data;
+}
+
+async function uploadImageToShopify(buffer, filename, alt = "") {
+  const mimeType = "image/png";
+
+  const staged = await shopifyGraphQL(`
+    mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+      stagedUploadsCreate(input: $input) {
+        stagedTargets {
+          url
+          resourceUrl
+          parameters {
+            name
+            value
+          }
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `, {
+    input: [{
+      filename,
+      mimeType,
+      httpMethod: "POST",
+      resource: "FILE",
+      fileSize: String(buffer.length)
+    }]
+  });
+
+  const stagedPayload = staged.stagedUploadsCreate;
+
+  if (stagedPayload.userErrors?.length) {
+    console.error("Shopify staged upload userErrors:", stagedPayload.userErrors);
+    throw new Error(stagedPayload.userErrors[0].message || "Erreur staged upload Shopify");
+  }
+
+  const target = stagedPayload.stagedTargets[0];
+  const form = new FormData();
+
+  target.parameters.forEach((p) => {
+    form.append(p.name, p.value);
+  });
+
+  form.append("file", new Blob([buffer], { type: mimeType }), filename);
+
+  const uploadRes = await fetch(target.url, {
+    method: "POST",
+    body: form
+  });
+
+  if (!uploadRes.ok) {
+    const text = await uploadRes.text();
+    console.error("Shopify binary upload failed:", text);
+    throw new Error("Upload binaire Shopify échoué");
+  }
+
+  const fileCreate = await shopifyGraphQL(`
+    mutation fileCreate($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) {
+        files {
+          id
+          alt
+          ... on MediaImage {
+            image {
+              url
+            }
+          }
+          ... on GenericFile {
+            url
+          }
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `, {
+    files: [{
+      alt,
+      contentType: "IMAGE",
+      originalSource: target.resourceUrl
+    }]
+  });
+
+  const filePayload = fileCreate.fileCreate;
+
+  if (filePayload.userErrors?.length) {
+    console.error("Shopify fileCreate userErrors:", filePayload.userErrors);
+    throw new Error(filePayload.userErrors[0].message || "Erreur fileCreate Shopify");
+  }
+
+  const file = filePayload.files?.[0];
+  const finalUrl = file?.image?.url || file?.url || null;
+
+  if (!finalUrl) {
+    console.error("Fichier Shopify créé sans URL finale:", file);
+    throw new Error("URL Shopify introuvable après upload");
+  }
+
+  return {
+    id: file.id,
+    url: finalUrl
+  };
+}
+
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
     const { prompt, count = 3 } = req.body || {};
@@ -594,12 +727,33 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       const fileBase = `${Date.now()}-${slugify(cleanPrompt)}-${i + 1}`;
       const fileName = `${fileBase}.png`;
       const filePath = path.join(logosDir, fileName);
+      const buffer = Buffer.from(item.b64_json, "base64");
 
-      fs.writeFileSync(filePath, Buffer.from(item.b64_json, "base64"));
+      // sauvegarde locale
+      fs.writeFileSync(filePath, buffer);
+
+      // upload Shopify avec fallback local si erreur
+      let shopifyUrl = null;
+      let shopifyFileId = null;
+
+      try {
+        const uploaded = await uploadImageToShopify(
+          buffer,
+          fileName,
+          `Logo IA: ${cleanPrompt}`
+        );
+        shopifyUrl = uploaded.url;
+        shopifyFileId = uploaded.id;
+      } catch (e) {
+        console.error("Shopify upload failed:", e.message);
+      }
 
       logos.push({
         id: fileBase,
-        url: `${baseUrl}/generated/logos/${fileName}`
+        url: shopifyUrl || `${baseUrl}/generated/logos/${fileName}`,
+        localUrl: `${baseUrl}/generated/logos/${fileName}`,
+        shopifyUrl,
+        shopifyFileId
       });
     }
 
@@ -744,6 +898,7 @@ app.post("/api/variant/resolve", async (req, res) => {
     });
   }
 });
+
 app.get("/api/gallery/random", async (req, res) => {
   try {
     const baseUrl = getBaseUrl(req);
@@ -761,10 +916,7 @@ app.get("/api/gallery/random", async (req, res) => {
     }
 
     const getRandom = () => files[Math.floor(Math.random() * files.length)];
-
     const items = [];
-
-    // 🔥 important : limiter pour éviter crash serveur
     const LIMIT = 6;
 
     for (let i = 0; i < LIMIT; i++) {
@@ -775,7 +927,6 @@ app.get("/api/gallery/random", async (req, res) => {
         const leftUrl = `${baseUrl}/generated/logos/${left}`;
         const rightUrl = right ? `${baseUrl}/generated/logos/${right}` : null;
 
-        // ⚠️ on utilise TON moteur existant (inchangé)
         const buffer = await buildProductionComposite({
           dimension: "150x37mm",
           color: "blanc",
@@ -796,14 +947,12 @@ app.get("/api/gallery/random", async (req, res) => {
           leftLogo: leftUrl,
           rightLogo: rightUrl
         });
-
       } catch (err) {
         console.error("Erreur item gallery:", err);
       }
     }
 
     res.json({ items });
-
   } catch (e) {
     console.error("Erreur gallery globale:", e);
     res.status(500).json({ error: "gallery error" });
@@ -815,4 +964,7 @@ app.listen(PORT, () => {
   console.log("Fonts dir:", fontsDir);
   console.log("Script font exists:", fs.existsSync(path.join(fontsDir, "script.ttf")));
   console.log("OPENAI_API_KEY présente :", !!process.env.OPENAI_API_KEY);
+  console.log("SHOPIFY_STORE présent :", !!process.env.SHOPIFY_STORE);
+  console.log("SHOPIFY_ADMIN_TOKEN présent :", !!process.env.SHOPIFY_ADMIN_TOKEN);
+  console.log("SHOPIFY_API_VERSION :", process.env.SHOPIFY_API_VERSION || "2025-01");
 });
