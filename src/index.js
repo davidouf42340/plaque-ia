@@ -27,9 +27,14 @@ const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
 const productionDir = path.join(generatedDir, "production");
 const fontsDir = path.join(__dirname, "fonts");
+const dbPath = path.join(generatedDir, "db.json");
 
 fs.mkdirSync(logosDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
+
+if (!fs.existsSync(dbPath)) {
+  fs.writeFileSync(dbPath, "[]", "utf8");
+}
 
 app.use("/generated", express.static(generatedDir));
 
@@ -43,6 +48,37 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
+
+function readDB() {
+  try {
+    if (!fs.existsSync(dbPath)) return [];
+    const raw = fs.readFileSync(dbPath, "utf8");
+    return JSON.parse(raw || "[]");
+  } catch (error) {
+    console.error("Erreur lecture db.json :", error);
+    return [];
+  }
+}
+
+function writeDB(data) {
+  try {
+    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), "utf8");
+  } catch (error) {
+    console.error("Erreur écriture db.json :", error);
+  }
+}
+
+function saveCreation(entry) {
+  const db = readDB();
+
+  db.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(),
+    ...entry
+  });
+
+  writeDB(db.slice(0, 300));
+}
 
 function getBaseUrl(req) {
   return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
@@ -908,9 +944,19 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
         console.error("Shopify upload failed:", e.message);
       }
 
+      const finalUrl = shopifyUrl || `${baseUrl}/generated/logos/${fileName}`;
+
+      saveCreation({
+        prompt: cleanPrompt,
+        imageUrl: finalUrl,
+        localUrl: `${baseUrl}/generated/logos/${fileName}`,
+        shopifyUrl,
+        shopifyFileId
+      });
+
       logos.push({
         id: fileBase,
-        url: shopifyUrl || `${baseUrl}/generated/logos/${fileName}`,
+        url: finalUrl,
         localUrl: `${baseUrl}/generated/logos/${fileName}`,
         shopifyUrl,
         shopifyFileId
@@ -1059,62 +1105,51 @@ app.post("/api/variant/resolve", async (req, res) => {
   }
 });
 
-app.get("/api/gallery/random", async (req, res) => {
+app.get("/api/gallery", async (req, res) => {
   try {
-    const baseUrl = getBaseUrl(req);
+    const db = readDB();
 
-    if (!fs.existsSync(logosDir)) {
+    if (!db.length) {
       return res.json({ items: [] });
     }
 
-    const files = fs.readdirSync(logosDir).filter((f) => f.endsWith(".png"));
-
-    console.log("Gallery logos:", files.length);
-
-    if (!files.length) {
-      return res.json({ items: [] });
-    }
-
-    const getRandom = () => files[Math.floor(Math.random() * files.length)];
-    const items = [];
-    const LIMIT = 6;
-
-    for (let i = 0; i < LIMIT; i += 1) {
-      try {
-        const left = getRandom();
-        const right = Math.random() > 0.5 ? getRandom() : null;
-
-        const leftUrl = `${baseUrl}/generated/logos/${left}`;
-        const rightUrl = right ? `${baseUrl}/generated/logos/${right}` : null;
-
-        const buffer = await buildProductionComposite({
-          dimension: "150x37mm",
-          color: "blanc",
-          line1: "VOTRE TEXTE",
-          line2: "ICI",
-          line3: "",
-          leftLogoUrl: leftUrl,
-          rightLogoUrl: rightUrl
-        });
-
-        const fileName = `gallery-${Date.now()}-${i}.png`;
-        const filePath = path.join(productionDir, fileName);
-
-        fs.writeFileSync(filePath, buffer);
-
-        items.push({
-          preview: `${baseUrl}/generated/production/${fileName}`,
-          leftLogo: leftUrl,
-          rightLogo: rightUrl
-        });
-      } catch (err) {
-        console.error("Erreur item gallery:", err);
-      }
-    }
+    const items = db.slice(0, 12).map((item) => ({
+      preview: item.imageUrl,
+      prompt: item.prompt,
+      imageUrl: item.imageUrl,
+      shopifyUrl: item.shopifyUrl || null,
+      localUrl: item.localUrl || null
+    }));
 
     res.json({ items });
   } catch (e) {
-    console.error("Erreur gallery globale:", e);
+    console.error("Erreur gallery :", e);
+    res.status(500).json({ error: "gallery error" });
+  }
+});
+
+app.get("/api/gallery/random", async (req, res) => {
+  try {
+    const db = readDB();
+
+    if (!db.length) {
+      return res.json({ items: [] });
+    }
+
+    const items = db
+      .sort(() => 0.5 - Math.random())
+      .slice(0, 12)
+      .map((item) => ({
+        preview: item.imageUrl,
+        prompt: item.prompt,
+        imageUrl: item.imageUrl,
+        shopifyUrl: item.shopifyUrl || null,
+        localUrl: item.localUrl || null
+      }));
+
+    res.json({ items });
+  } catch (e) {
+    console.error("Erreur gallery random :", e);
     res.status(500).json({ error: "gallery error" });
   }
 });
