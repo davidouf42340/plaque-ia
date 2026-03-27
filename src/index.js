@@ -77,7 +77,7 @@ function saveCreation(entry) {
     ...entry
   });
 
-  writeDB(db.slice(0, 300));
+  writeDB(db.slice(0, 500));
 }
 
 function getBaseUrl(req) {
@@ -268,6 +268,113 @@ const VARIANT_MAP = {
     }
   }
 };
+
+const CATEGORY_RULES = [
+  {
+    key: "animaux",
+    words: [
+      "chien", "chat", "cheval", "lion", "tigre", "lapin", "oiseau", "aigle", "serpent",
+      "rottweiler", "berger", "bouledogue", "caniche", "animaux", "animal", "panda", "poisson",
+      "requin", "éléphant", "elephant", "tortue", "papillon", "coq", "hibou"
+    ]
+  },
+  {
+    key: "sport",
+    words: [
+      "football", "foot", "basket", "tennis", "rugby", "golf", "haltère", "haltere", "musculation",
+      "fitness", "vélo", "velo", "cyclisme", "boxe", "judo", "karaté", "karate", "natation",
+      "running", "course", "sport", "ballon", "raquette", "crossfit", "marathon"
+    ]
+  },
+  {
+    key: "medical",
+    words: [
+      "pharmacie", "pharmacien", "dentiste", "dentaire", "stéthoscope", "stethoscope",
+      "croix médicale", "croix medicale", "croix pharmacie", "medecin", "médecin",
+      "infirmier", "infirmière", "infirmiere", "vétérinaire", "veterinaire", "santé", "sante",
+      "seringue", "hôpital", "hopital", "soin", "paramedical", "kiné", "kine"
+    ]
+  },
+  {
+    key: "beaute",
+    words: [
+      "coiffeur", "coiffure", "ciseaux", "ongle", "ongles", "esthétique", "esthetique",
+      "maquillage", "makeup", "beauty", "beauté", "beaute", "barbier", "barber",
+      "massage", "spa", "shampoing", "brosse", "salon"
+    ]
+  },
+  {
+    key: "restauration",
+    words: [
+      "pizza", "burger", "café", "cafe", "restaurant", "fourchette", "cuillère", "cuillere",
+      "couteau", "boulangerie", "pâtisserie", "patisserie", "croissant", "pain", "boisson",
+      "vin", "cocktail", "chef", "cuisine", "tasse"
+    ]
+  },
+  {
+    key: "batiment",
+    words: [
+      "maçon", "macon", "bâtiment", "batiment", "maison", "toit", "marteau", "clé anglaise",
+      "cle anglaise", "plombier", "électricien", "electricien", "outils", "tournevis",
+      "perceuse", "construction", "artisan", "travaux"
+    ]
+  },
+  {
+    key: "nature",
+    words: [
+      "arbre", "fleur", "montagne", "soleil", "lune", "forêt", "foret", "feuille",
+      "nature", "paysage", "nuage", "étoile", "etoile", "rose", "plante", "rivière", "riviere"
+    ]
+  },
+  {
+    key: "symboles",
+    words: [
+      "logo", "icone", "icône", "minimaliste", "symbole", "symbol", "coeur", "cœur",
+      "éclair", "eclair", "flèche", "fleche", "couronne", "croix", "badge", "blason"
+    ]
+  }
+];
+
+function detectCategory(prompt = "") {
+  const p = String(prompt || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  for (const rule of CATEGORY_RULES) {
+    if (rule.words.some((word) => p.includes(word))) {
+      return rule.key;
+    }
+  }
+
+  return "divers";
+}
+
+function getGalleryCategories(db = []) {
+  const defaultOrder = [
+    "tous",
+    "animaux",
+    "sport",
+    "medical",
+    "beaute",
+    "restauration",
+    "batiment",
+    "nature",
+    "symboles",
+    "divers"
+  ];
+
+  const existing = new Set(db.map((item) => item.category).filter(Boolean));
+  const ordered = defaultOrder.filter((cat) => cat === "tous" || existing.has(cat));
+
+  for (const item of existing) {
+    if (!ordered.includes(item)) {
+      ordered.push(item);
+    }
+  }
+
+  return ordered;
+}
 
 function hexToRgb(hex = "#111111") {
   const clean = hex.replace("#", "");
@@ -945,9 +1052,11 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       }
 
       const finalUrl = shopifyUrl || `${baseUrl}/generated/logos/${fileName}`;
+      const category = detectCategory(cleanPrompt);
 
       saveCreation({
         prompt: cleanPrompt,
+        category,
         imageUrl: finalUrl,
         localUrl: `${baseUrl}/generated/logos/${fileName}`,
         shopifyUrl,
@@ -959,7 +1068,8 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
         url: finalUrl,
         localUrl: `${baseUrl}/generated/logos/${fileName}`,
         shopifyUrl,
-        shopifyFileId
+        shopifyFileId,
+        category
       });
     }
 
@@ -1105,23 +1215,44 @@ app.post("/api/variant/resolve", async (req, res) => {
   }
 });
 
+app.get("/api/gallery/categories", async (req, res) => {
+  try {
+    const db = readDB();
+    const categories = getGalleryCategories(db);
+    res.json({ categories });
+  } catch (error) {
+    console.error("Erreur gallery categories :", error);
+    res.status(500).json({ error: "gallery categories error" });
+  }
+});
+
 app.get("/api/gallery", async (req, res) => {
   try {
     const db = readDB();
+    const requestedCategory = String(req.query.category || "tous").toLowerCase().trim();
 
-    if (!db.length) {
-      return res.json({ items: [] });
+    let filtered = db;
+
+    if (requestedCategory && requestedCategory !== "tous") {
+      filtered = db.filter((item) => String(item.category || "divers").toLowerCase() === requestedCategory);
     }
 
-    const items = db.slice(0, 12).map((item) => ({
+    const items = filtered.slice(0, 60).map((item) => ({
+      id: item.id,
       preview: item.imageUrl,
       prompt: item.prompt,
+      category: item.category || "divers",
       imageUrl: item.imageUrl,
       shopifyUrl: item.shopifyUrl || null,
-      localUrl: item.localUrl || null
+      localUrl: item.localUrl || null,
+      createdAt: item.createdAt
     }));
 
-    res.json({ items });
+    res.json({
+      items,
+      categories: getGalleryCategories(db),
+      activeCategory: requestedCategory || "tous"
+    });
   } catch (e) {
     console.error("Erreur gallery :", e);
     res.status(500).json({ error: "gallery error" });
@@ -1133,21 +1264,28 @@ app.get("/api/gallery/random", async (req, res) => {
     const db = readDB();
 
     if (!db.length) {
-      return res.json({ items: [] });
+      return res.json({ items: [], categories: ["tous"], activeCategory: "tous" });
     }
 
-    const items = db
+    const items = [...db]
       .sort(() => 0.5 - Math.random())
       .slice(0, 12)
       .map((item) => ({
+        id: item.id,
         preview: item.imageUrl,
         prompt: item.prompt,
+        category: item.category || "divers",
         imageUrl: item.imageUrl,
         shopifyUrl: item.shopifyUrl || null,
-        localUrl: item.localUrl || null
+        localUrl: item.localUrl || null,
+        createdAt: item.createdAt
       }));
 
-    res.json({ items });
+    res.json({
+      items,
+      categories: getGalleryCategories(db),
+      activeCategory: "tous"
+    });
   } catch (e) {
     console.error("Erreur gallery random :", e);
     res.status(500).json({ error: "gallery error" });
