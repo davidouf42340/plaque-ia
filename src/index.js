@@ -623,6 +623,7 @@ async function shopifyGraphQL(query, variables = {}) {
 
   return data.data;
 }
+
 async function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -766,15 +767,31 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
     mutation fileCreate($files: [FileCreateInput!]!) {
       fileCreate(files: $files) {
         files {
-          id
-          alt
+          __typename
           ... on MediaImage {
+            id
+            alt
+            fileStatus
+            status
             image {
               url
             }
+            preview {
+              image {
+                url
+              }
+            }
           }
           ... on GenericFile {
+            id
+            alt
+            fileStatus
             url
+            preview {
+              image {
+                url
+              }
+            }
           }
         }
         userErrors {
@@ -798,17 +815,33 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
     throw new Error(filePayload.userErrors[0].message || "Erreur fileCreate Shopify");
   }
 
-  const file = filePayload.files?.[0];
-  const finalUrl = file?.image?.url || file?.url || null;
+  const createdFile = filePayload.files?.[0];
 
-  if (!finalUrl) {
-    console.error("Fichier Shopify créé sans URL finale:", file);
-    throw new Error("URL Shopify introuvable après upload");
+  if (!createdFile?.id) {
+    console.error("Shopify fileCreate sans id:", createdFile);
+    throw new Error("Fichier Shopify créé sans identifiant");
   }
 
+  const immediateUrl =
+    createdFile?.image?.url ||
+    createdFile?.url ||
+    createdFile?.preview?.image?.url ||
+    null;
+
+  if (immediateUrl) {
+    return {
+      id: createdFile.id,
+      url: immediateUrl
+    };
+  }
+
+  console.log("Fichier Shopify en attente de traitement :", createdFile.id);
+
+  const readyFile = await waitForShopifyFileReady(createdFile.id);
+
   return {
-    id: file.id,
-    url: finalUrl
+    id: readyFile.id,
+    url: readyFile.url
   };
 }
 
