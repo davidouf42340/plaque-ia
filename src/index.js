@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
-}); 
+});
 
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
@@ -544,17 +544,64 @@ async function buildProductionComposite({
 }
 
 // =======================
-// SHOPIFY UPLOAD
+// SHOPIFY TOKEN + UPLOAD
 // =======================
+
+let shopifyTokenCache = {
+  accessToken: null,
+  expiresAt: 0
+};
+
+async function getShopifyAdminAccessToken() {
+  const shop = process.env.SHOPIFY_STORE;
+  const clientId = process.env.SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+
+  if (!shop || !clientId || !clientSecret) {
+    throw new Error("Variables Shopify manquantes : SHOPIFY_STORE, SHOPIFY_CLIENT_ID ou SHOPIFY_CLIENT_SECRET");
+  }
+
+  const now = Date.now();
+
+  if (
+    shopifyTokenCache.accessToken &&
+    shopifyTokenCache.expiresAt &&
+    now < shopifyTokenCache.expiresAt - 60_000
+  ) {
+    return shopifyTokenCache.accessToken;
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: clientId,
+    client_secret: clientSecret
+  });
+
+  const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: body.toString()
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || !data?.access_token) {
+    console.error("Shopify token error:", JSON.stringify(data, null, 2));
+    throw new Error("Impossible d'obtenir le token Admin Shopify");
+  }
+
+  shopifyTokenCache.accessToken = data.access_token;
+  shopifyTokenCache.expiresAt = now + ((Number(data.expires_in) || 86399) * 1000);
+
+  return shopifyTokenCache.accessToken;
+}
 
 async function shopifyGraphQL(query, variables = {}) {
   const shop = process.env.SHOPIFY_STORE;
-  const token = process.env.SHOPIFY_ADMIN_TOKEN;
   const version = process.env.SHOPIFY_API_VERSION || "2025-01";
-
-  if (!shop || !token) {
-    throw new Error("Variables Shopify manquantes : SHOPIFY_STORE ou SHOPIFY_ADMIN_TOKEN");
-  }
+  const accessToken = await getShopifyAdminAccessToken();
 
   const url = `https://${shop}/admin/api/${version}/graphql.json`;
 
@@ -562,7 +609,7 @@ async function shopifyGraphQL(query, variables = {}) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": token
+      "X-Shopify-Access-Token": accessToken
     },
     body: JSON.stringify({ query, variables })
   });
@@ -729,10 +776,8 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       const filePath = path.join(logosDir, fileName);
       const buffer = Buffer.from(item.b64_json, "base64");
 
-      // sauvegarde locale
       fs.writeFileSync(filePath, buffer);
 
-      // upload Shopify avec fallback local si erreur
       let shopifyUrl = null;
       let shopifyFileId = null;
 
@@ -965,6 +1010,7 @@ app.listen(PORT, () => {
   console.log("Script font exists:", fs.existsSync(path.join(fontsDir, "script.ttf")));
   console.log("OPENAI_API_KEY présente :", !!process.env.OPENAI_API_KEY);
   console.log("SHOPIFY_STORE présent :", !!process.env.SHOPIFY_STORE);
-  console.log("SHOPIFY_ADMIN_TOKEN présent :", !!process.env.SHOPIFY_ADMIN_TOKEN);
+  console.log("SHOPIFY_CLIENT_ID présent :", !!process.env.SHOPIFY_CLIENT_ID);
+  console.log("SHOPIFY_CLIENT_SECRET présent :", !!process.env.SHOPIFY_CLIENT_SECRET);
   console.log("SHOPIFY_API_VERSION :", process.env.SHOPIFY_API_VERSION || "2025-01");
 });
