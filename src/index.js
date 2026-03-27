@@ -623,6 +623,87 @@ async function shopifyGraphQL(query, variables = {}) {
 
   return data.data;
 }
+async function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getShopifyFileById(fileId) {
+  const data = await shopifyGraphQL(`
+    query getFile($id: ID!) {
+      node(id: $id) {
+        __typename
+        ... on MediaImage {
+          id
+          alt
+          fileStatus
+          status
+          image {
+            url
+          }
+          preview {
+            image {
+              url
+            }
+          }
+        }
+        ... on GenericFile {
+          id
+          alt
+          fileStatus
+          url
+          preview {
+            image {
+              url
+            }
+          }
+        }
+      }
+    }
+  `, { id: fileId });
+
+  return data?.node || null;
+}
+
+async function waitForShopifyFileReady(fileId, maxAttempts = 15, delayMs = 1500) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const file = await getShopifyFileById(fileId);
+
+    if (!file) {
+      throw new Error("Fichier Shopify introuvable après création");
+    }
+
+    const typename = file.__typename;
+    const mediaStatus = file.status || null;
+    const fileStatus = file.fileStatus || null;
+
+    const finalUrl =
+      file?.image?.url ||
+      file?.url ||
+      file?.preview?.image?.url ||
+      null;
+
+    if (finalUrl && (mediaStatus === "READY" || fileStatus === "READY" || !mediaStatus)) {
+      return {
+        id: file.id,
+        url: finalUrl,
+        raw: file
+      };
+    }
+
+    if (mediaStatus === "FAILED" || fileStatus === "FAILED") {
+      console.error("Shopify file FAILED:", file);
+      throw new Error("Le traitement Shopify du fichier a échoué");
+    }
+
+    console.log(
+      `Attente fichier Shopify ${fileId} - tentative ${attempt}/${maxAttempts} - type=${typename} fileStatus=${fileStatus} status=${mediaStatus}`
+    );
+
+    await wait(delayMs);
+  }
+
+  throw new Error("Timeout en attente du fichier Shopify READY");
+}
 
 async function uploadImageToShopify(buffer, filename, alt = "") {
   const mimeType = "image/png";
