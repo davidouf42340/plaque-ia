@@ -646,9 +646,6 @@ async function getShopifyFileById(fileId) {
               url
             }
           }
-          originalSource {
-            url
-          }
         }
         ... on GenericFile {
           id
@@ -659,9 +656,6 @@ async function getShopifyFileById(fileId) {
             image {
               url
             }
-          }
-          originalSource {
-            url
           }
         }
       }
@@ -687,7 +681,6 @@ async function waitForShopifyFileReady(fileId, maxAttempts = 30, delayMs = 2000)
       file?.image?.url ||
       file?.preview?.image?.url ||
       file?.url ||
-      file?.originalSource?.url ||
       null;
 
     console.log(
@@ -788,9 +781,6 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
                 url
               }
             }
-            originalSource {
-              url
-            }
           }
           ... on GenericFile {
             id
@@ -801,9 +791,6 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
               image {
                 url
               }
-            }
-            originalSource {
-              url
             }
           }
         }
@@ -839,7 +826,6 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
     createdFile?.image?.url ||
     createdFile?.preview?.image?.url ||
     createdFile?.url ||
-    createdFile?.originalSource?.url ||
     null;
 
   if (immediateUrl) {
@@ -904,10 +890,8 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       const filePath = path.join(logosDir, fileName);
       const buffer = Buffer.from(item.b64_json, "base64");
 
-      // sauvegarde locale
       fs.writeFileSync(filePath, buffer);
 
-      // upload Shopify avec fallback local
       let shopifyUrl = null;
       let shopifyFileId = null;
 
