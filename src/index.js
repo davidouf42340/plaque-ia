@@ -236,7 +236,7 @@ const VARIANT_MAP = {
 function hexToRgb(hex = "#111111") {
   const clean = hex.replace("#", "");
   const full = clean.length === 3
-    ? clean.split("").map(c => c + c).join("")
+    ? clean.split("").map((c) => c + c).join("")
     : clean;
 
   return {
@@ -646,6 +646,9 @@ async function getShopifyFileById(fileId) {
               url
             }
           }
+          originalSource {
+            url
+          }
         }
         ... on GenericFile {
           id
@@ -657,6 +660,9 @@ async function getShopifyFileById(fileId) {
               url
             }
           }
+          originalSource {
+            url
+          }
         }
       }
     }
@@ -665,7 +671,7 @@ async function getShopifyFileById(fileId) {
   return data?.node || null;
 }
 
-async function waitForShopifyFileReady(fileId, maxAttempts = 15, delayMs = 1500) {
+async function waitForShopifyFileReady(fileId, maxAttempts = 30, delayMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const file = await getShopifyFileById(fileId);
 
@@ -679,11 +685,16 @@ async function waitForShopifyFileReady(fileId, maxAttempts = 15, delayMs = 1500)
 
     const finalUrl =
       file?.image?.url ||
-      file?.url ||
       file?.preview?.image?.url ||
+      file?.url ||
+      file?.originalSource?.url ||
       null;
 
-    if (finalUrl && (mediaStatus === "READY" || fileStatus === "READY" || !mediaStatus)) {
+    console.log(
+      `Attente fichier Shopify ${fileId} - tentative ${attempt}/${maxAttempts} - type=${typename} fileStatus=${fileStatus} status=${mediaStatus} url=${finalUrl || "null"}`
+    );
+
+    if (finalUrl) {
       return {
         id: file.id,
         url: finalUrl,
@@ -696,14 +707,10 @@ async function waitForShopifyFileReady(fileId, maxAttempts = 15, delayMs = 1500)
       throw new Error("Le traitement Shopify du fichier a échoué");
     }
 
-    console.log(
-      `Attente fichier Shopify ${fileId} - tentative ${attempt}/${maxAttempts} - type=${typename} fileStatus=${fileStatus} status=${mediaStatus}`
-    );
-
     await wait(delayMs);
   }
 
-  throw new Error("Timeout en attente du fichier Shopify READY");
+  throw new Error("Timeout en attente de l'URL Shopify");
 }
 
 async function uploadImageToShopify(buffer, filename, alt = "") {
@@ -781,6 +788,9 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
                 url
               }
             }
+            originalSource {
+              url
+            }
           }
           ... on GenericFile {
             id
@@ -791,6 +801,9 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
               image {
                 url
               }
+            }
+            originalSource {
+              url
             }
           }
         }
@@ -824,8 +837,9 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
 
   const immediateUrl =
     createdFile?.image?.url ||
-    createdFile?.url ||
     createdFile?.preview?.image?.url ||
+    createdFile?.url ||
+    createdFile?.originalSource?.url ||
     null;
 
   if (immediateUrl) {
@@ -890,8 +904,10 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       const filePath = path.join(logosDir, fileName);
       const buffer = Buffer.from(item.b64_json, "base64");
 
+      // sauvegarde locale
       fs.writeFileSync(filePath, buffer);
 
+      // upload Shopify avec fallback local
       let shopifyUrl = null;
       let shopifyFileId = null;
 
@@ -903,6 +919,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
         );
         shopifyUrl = uploaded.url;
         shopifyFileId = uploaded.id;
+        console.log("Shopify upload OK:", shopifyUrl);
       } catch (e) {
         console.error("Shopify upload failed:", e.message);
       }
@@ -1066,7 +1083,7 @@ app.get("/api/gallery/random", async (req, res) => {
       return res.json({ items: [] });
     }
 
-    const files = fs.readdirSync(logosDir).filter(f => f.endsWith(".png"));
+    const files = fs.readdirSync(logosDir).filter((f) => f.endsWith(".png"));
 
     console.log("Gallery logos:", files.length);
 
@@ -1078,7 +1095,7 @@ app.get("/api/gallery/random", async (req, res) => {
     const items = [];
     const LIMIT = 6;
 
-    for (let i = 0; i < LIMIT; i++) {
+    for (let i = 0; i < LIMIT; i += 1) {
       try {
         const left = getRandom();
         const right = Math.random() > 0.5 ? getRandom() : null;
