@@ -68,18 +68,6 @@ function writeDB(data) {
   }
 }
 
-function saveCreation(entry) {
-  const db = readDB();
-
-  db.unshift({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    createdAt: new Date().toISOString(),
-    ...entry
-  });
-
-  writeDB(db.slice(0, 500));
-}
-
 function getBaseUrl(req) {
   return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
 }
@@ -127,6 +115,59 @@ function normalizeColor(value = "") {
   };
 
   return map[v] || v;
+}
+
+/**
+ * Hash stable pour choisir toujours 1 image parmi 3
+ * pour un même prompt / même génération.
+ */
+function hashString(str = "") {
+  let hash = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * Choisit 1 index de gallery parmi les images générées.
+ * Stable et pseudo-aléatoire.
+ */
+function pickGalleryIndex(prompt = "", items = []) {
+  if (!Array.isArray(items) || !items.length) return 0;
+  const seed = `${prompt}__${items.map((x) => x.fileBase || x.id || x.url || "").join("|")}`;
+  return hashString(seed) % items.length;
+}
+
+/**
+ * Sauvegarde un groupe de créations :
+ * - toutes les images restent en base
+ * - une seule a inGallery: true
+ */
+function saveCreationBatch({
+  prompt,
+  category,
+  creations = []
+}) {
+  const db = readDB();
+  const createdAt = new Date().toISOString();
+  const groupId = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const galleryIndex = pickGalleryIndex(prompt, creations);
+
+  const entries = creations.map((entry, index) => ({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index + 1}`,
+    groupId,
+    createdAt,
+    prompt,
+    category,
+    inGallery: index === galleryIndex,
+    ...entry
+  }));
+
+  db.unshift(...entries);
+  writeDB(db.slice(0, 500));
 }
 
 const ALLOWED_THICKNESS_BY_COLOR = {
@@ -364,7 +405,8 @@ function getGalleryCategories(db = []) {
     "divers"
   ];
 
-  const existing = new Set(db.map((item) => item.category).filter(Boolean));
+  const galleryItems = db.filter((item) => item.inGallery === true);
+  const existing = new Set(galleryItems.map((item) => item.category).filter(Boolean));
   const ordered = defaultOrder.filter((cat) => cat === "tous" || existing.has(cat));
 
   for (const item of existing) {
@@ -1023,6 +1065,8 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
     });
 
     const logos = [];
+    const creationsToSave = [];
+    const category = detectCategory(cleanPrompt);
 
     for (let i = 0; i < (result.data || []).length; i += 1) {
       const item = result.data[i];
@@ -1051,14 +1095,13 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
         console.error("Shopify upload failed:", e.message);
       }
 
-      const finalUrl = shopifyUrl || `${baseUrl}/generated/logos/${fileName}`;
-      const category = detectCategory(cleanPrompt);
+      const localUrl = `${baseUrl}/generated/logos/${fileName}`;
+      const finalUrl = shopifyUrl || localUrl;
 
-      saveCreation({
-        prompt: cleanPrompt,
-        category,
+      creationsToSave.push({
+        fileBase,
         imageUrl: finalUrl,
-        localUrl: `${baseUrl}/generated/logos/${fileName}`,
+        localUrl,
         shopifyUrl,
         shopifyFileId
       });
@@ -1066,10 +1109,18 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       logos.push({
         id: fileBase,
         url: finalUrl,
-        localUrl: `${baseUrl}/generated/logos/${fileName}`,
+        localUrl,
         shopifyUrl,
         shopifyFileId,
         category
+      });
+    }
+
+    if (creationsToSave.length) {
+      saveCreationBatch({
+        prompt: cleanPrompt,
+        category,
+        creations: creationsToSave
       });
     }
 
@@ -1231,10 +1282,10 @@ app.get("/api/gallery", async (req, res) => {
     const db = readDB();
     const requestedCategory = String(req.query.category || "tous").toLowerCase().trim();
 
-    let filtered = db;
+    let filtered = db.filter((item) => item.inGallery === true);
 
     if (requestedCategory && requestedCategory !== "tous") {
-      filtered = db.filter((item) => String(item.category || "divers").toLowerCase() === requestedCategory);
+      filtered = filtered.filter((item) => String(item.category || "divers").toLowerCase() === requestedCategory);
     }
 
     const items = filtered.slice(0, 60).map((item) => ({
@@ -1261,7 +1312,7 @@ app.get("/api/gallery", async (req, res) => {
 
 app.get("/api/gallery/random", async (req, res) => {
   try {
-    const db = readDB();
+    const db = readDB().filter((item) => item.inGallery === true);
 
     if (!db.length) {
       return res.json({ items: [], categories: ["tous"], activeCategory: "tous" });
