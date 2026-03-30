@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import OpenAI from "openai";
 import sharp from "sharp";
+import { createClient } from "@supabase/supabase-js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -23,18 +24,18 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
 const productionDir = path.join(generatedDir, "production");
 const fontsDir = path.join(__dirname, "fonts");
-const dbPath = path.join(generatedDir, "db.json");
 
 fs.mkdirSync(logosDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
-
-if (!fs.existsSync(dbPath)) {
-  fs.writeFileSync(dbPath, "[]", "utf8");
-}
 
 app.use("/generated", express.static(generatedDir));
 
@@ -48,25 +49,6 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
-
-function readDB() {
-  try {
-    if (!fs.existsSync(dbPath)) return [];
-    const raw = fs.readFileSync(dbPath, "utf8");
-    return JSON.parse(raw || "[]");
-  } catch (error) {
-    console.error("Erreur lecture db.json :", error);
-    return [];
-  }
-}
-
-function writeDB(data) {
-  try {
-    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), "utf8");
-  } catch (error) {
-    console.error("Erreur écriture db.json :", error);
-  }
-}
 
 function getBaseUrl(req) {
   return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
@@ -117,10 +99,6 @@ function normalizeColor(value = "") {
   return map[v] || v;
 }
 
-/**
- * Hash stable pour choisir toujours 1 image parmi 3
- * pour un même prompt / même génération.
- */
 function hashString(str = "") {
   let hash = 0;
   for (let i = 0; i < str.length; i += 1) {
@@ -130,44 +108,94 @@ function hashString(str = "") {
   return Math.abs(hash);
 }
 
-/**
- * Choisit 1 index de gallery parmi les images générées.
- * Stable et pseudo-aléatoire.
- */
 function pickGalleryIndex(prompt = "", items = []) {
   if (!Array.isArray(items) || !items.length) return 0;
   const seed = `${prompt}__${items.map((x) => x.fileBase || x.id || x.url || "").join("|")}`;
   return hashString(seed) % items.length;
 }
 
-/**
- * Sauvegarde un groupe de créations :
- * - toutes les images restent en base
- * - une seule a inGallery: true
- */
-function saveCreationBatch({
+async function saveCreationBatch({
   prompt,
   category,
   creations = []
 }) {
-  const db = readDB();
   const createdAt = new Date().toISOString();
   const groupId = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
   const galleryIndex = pickGalleryIndex(prompt, creations);
 
   const entries = creations.map((entry, index) => ({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index + 1}`,
-    groupId,
-    createdAt,
+    group_id: groupId,
+    created_at: createdAt,
     prompt,
     category,
-    inGallery: index === galleryIndex,
-    ...entry
+    in_gallery: index === galleryIndex,
+    image_url: entry.imageUrl,
+    local_url: entry.localUrl || null,
+    shopify_url: entry.shopifyUrl || null,
+    shopify_file_id: entry.shopifyFileId || null
   }));
 
-  db.unshift(...entries);
-  writeDB(db.slice(0, 500));
+  const { error } = await supabase
+    .from("gallery_items")
+    .insert(entries);
+
+  if (error) {
+    console.error("Erreur Supabase insert:", error);
+    throw new Error("Impossible de sauvegarder la galerie dans Supabase");
+  }
+}
+
+async function getGalleryItems({ category = "tous", limit = 60 } = {}) {
+  let query = supabase
+    .from("gallery_items")
+    .select("*")
+    .eq("in_gallery", true)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (category && category !== "tous") {
+    query = query.eq("category", category);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Erreur getGalleryItems Supabase :", error);
+    throw new Error("Impossible de charger la galerie");
+  }
+
+  return data || [];
+}
+
+async function getAllGalleryItemsForCategories() {
+  const { data, error } = await supabase
+    .from("gallery_items")
+    .select("category")
+    .eq("in_gallery", true);
+
+  if (error) {
+    console.error("Erreur catégories galerie Supabase :", error);
+    throw new Error("Impossible de charger les catégories");
+  }
+
+  return data || [];
+}
+
+async function getRandomGalleryItems(limit = 12) {
+  const { data, error } = await supabase
+    .from("gallery_items")
+    .select("*")
+    .eq("in_gallery", true)
+    .limit(300);
+
+  if (error) {
+    console.error("Erreur getRandomGalleryItems Supabase :", error);
+    throw new Error("Impossible de charger la galerie aléatoire");
+  }
+
+  const shuffled = [...(data || [])].sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, limit);
 }
 
 const ALLOWED_THICKNESS_BY_COLOR = {
@@ -391,7 +419,7 @@ function detectCategory(prompt = "") {
   return "divers";
 }
 
-function getGalleryCategories(db = []) {
+function getGalleryCategories(items = []) {
   const defaultOrder = [
     "tous",
     "animaux",
@@ -405,8 +433,12 @@ function getGalleryCategories(db = []) {
     "divers"
   ];
 
-  const galleryItems = db.filter((item) => item.inGallery === true);
-  const existing = new Set(galleryItems.map((item) => item.category).filter(Boolean));
+  const existing = new Set(
+    items
+      .map((item) => item.category)
+      .filter(Boolean)
+  );
+
   const ordered = defaultOrder.filter((cat) => cat === "tous" || existing.has(cat));
 
   for (const item of existing) {
@@ -1117,7 +1149,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
     }
 
     if (creationsToSave.length) {
-      saveCreationBatch({
+      await saveCreationBatch({
         prompt: cleanPrompt,
         category,
         creations: creationsToSave
@@ -1268,8 +1300,8 @@ app.post("/api/variant/resolve", async (req, res) => {
 
 app.get("/api/gallery/categories", async (req, res) => {
   try {
-    const db = readDB();
-    const categories = getGalleryCategories(db);
+    const items = await getAllGalleryItemsForCategories();
+    const categories = getGalleryCategories(items);
     res.json({ categories });
   } catch (error) {
     console.error("Erreur gallery categories :", error);
@@ -1279,29 +1311,29 @@ app.get("/api/gallery/categories", async (req, res) => {
 
 app.get("/api/gallery", async (req, res) => {
   try {
-    const db = readDB();
     const requestedCategory = String(req.query.category || "tous").toLowerCase().trim();
 
-    let filtered = db.filter((item) => item.inGallery === true);
+    const itemsRaw = await getGalleryItems({
+      category: requestedCategory,
+      limit: 60
+    });
 
-    if (requestedCategory && requestedCategory !== "tous") {
-      filtered = filtered.filter((item) => String(item.category || "divers").toLowerCase() === requestedCategory);
-    }
+    const allForCategories = await getAllGalleryItemsForCategories();
 
-    const items = filtered.slice(0, 60).map((item) => ({
+    const items = itemsRaw.map((item) => ({
       id: item.id,
-      preview: item.imageUrl,
+      preview: item.image_url,
       prompt: item.prompt,
       category: item.category || "divers",
-      imageUrl: item.imageUrl,
-      shopifyUrl: item.shopifyUrl || null,
-      localUrl: item.localUrl || null,
-      createdAt: item.createdAt
+      imageUrl: item.image_url,
+      shopifyUrl: item.shopify_url || null,
+      localUrl: item.local_url || null,
+      createdAt: item.created_at
     }));
 
     res.json({
       items,
-      categories: getGalleryCategories(db),
+      categories: getGalleryCategories(allForCategories),
       activeCategory: requestedCategory || "tous"
     });
   } catch (e) {
@@ -1312,29 +1344,23 @@ app.get("/api/gallery", async (req, res) => {
 
 app.get("/api/gallery/random", async (req, res) => {
   try {
-    const db = readDB().filter((item) => item.inGallery === true);
+    const randomItems = await getRandomGalleryItems(12);
+    const allForCategories = await getAllGalleryItemsForCategories();
 
-    if (!db.length) {
-      return res.json({ items: [], categories: ["tous"], activeCategory: "tous" });
-    }
-
-    const items = [...db]
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 12)
-      .map((item) => ({
-        id: item.id,
-        preview: item.imageUrl,
-        prompt: item.prompt,
-        category: item.category || "divers",
-        imageUrl: item.imageUrl,
-        shopifyUrl: item.shopifyUrl || null,
-        localUrl: item.localUrl || null,
-        createdAt: item.createdAt
-      }));
+    const items = randomItems.map((item) => ({
+      id: item.id,
+      preview: item.image_url,
+      prompt: item.prompt,
+      category: item.category || "divers",
+      imageUrl: item.image_url,
+      shopifyUrl: item.shopify_url || null,
+      localUrl: item.local_url || null,
+      createdAt: item.created_at
+    }));
 
     res.json({
       items,
-      categories: getGalleryCategories(db),
+      categories: getGalleryCategories(allForCategories),
       activeCategory: "tous"
     });
   } catch (e) {
@@ -1352,4 +1378,6 @@ app.listen(PORT, () => {
   console.log("SHOPIFY_CLIENT_ID présent :", !!process.env.SHOPIFY_CLIENT_ID);
   console.log("SHOPIFY_CLIENT_SECRET présent :", !!process.env.SHOPIFY_CLIENT_SECRET);
   console.log("SHOPIFY_API_VERSION :", process.env.SHOPIFY_API_VERSION || "2025-01");
+  console.log("SUPABASE_URL présent :", !!process.env.SUPABASE_URL);
+  console.log("SUPABASE_SERVICE_ROLE_KEY présente :", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
 });
