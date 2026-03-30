@@ -592,13 +592,6 @@ function escapeXml(str = "") {
     .replaceAll("'", "&apos;");
 }
 
-function getAdaptiveFontSize(baseSize, text = "", maxChars = 18) {
-  const len = String(text || "").length;
-  let ratio = 1;
-  if (len > maxChars) ratio = maxChars / len;
-  return Math.max(Math.round(baseSize * ratio), Math.round(baseSize * 0.5));
-}
-
 function getFontFamily(fontKey = "sans") {
   const map = {
     sans: "Arial Black, Arial, sans-serif",
@@ -639,52 +632,71 @@ function buildProductionTextSvg({
   fontFamilies = {},
   colorHex = "#111111"
 }) {
-  const safe1 = escapeXml(line1);
-  const safe2 = escapeXml(line2);
-  const safe3 = escapeXml(line3);
+  const lines = [line1, line2, line3]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
 
+  if (!lines.length) {
+    return Buffer.from(`
+      <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"></svg>
+    `);
+  }
+
+  const safeLines = lines.map(escapeXml);
   const scales = normalizeTextScale(textScale);
 
-  const base1 = Math.round(height * 0.40);
-  const base2 = Math.round(height * 0.24);
-  const base3 = Math.round(height * 0.18);
+  const globalScale = Math.min(scales.line1, scales.line2, scales.line3);
 
-  const font1 = getAdaptiveFontSize(Math.round(base1 * scales.line1), line1, 18);
-  const font2 = getAdaptiveFontSize(Math.round(base2 * scales.line2), line2, 22);
-  const font3 = getAdaptiveFontSize(Math.round(base3 * scales.line3), line3, 26);
+  const lineCount = lines.length;
+  const longestLineLength = Math.max(...lines.map((l) => l.length), 1);
 
-  const y1 = Math.round(height * 0.28);
-  const y2 = Math.round(height * 0.57);
-  const y3 = Math.round(height * 0.82);
+  let baseFontSize;
+  if (lineCount === 1) {
+    baseFontSize = height * 0.42;
+  } else if (lineCount === 2) {
+    baseFontSize = height * 0.28;
+  } else {
+    baseFontSize = height * 0.21;
+  }
+
+  let widthRatio = 1;
+  if (longestLineLength > 10) {
+    widthRatio = 10 / longestLineLength;
+  }
+
+  const sharedFontSize = Math.max(
+    Math.round(baseFontSize * globalScale * widthRatio),
+    Math.round(height * 0.09)
+  );
+
+  const lineGap = Math.round(sharedFontSize * 1.18);
+  const totalTextHeight = lineGap * (lineCount - 1);
+  const centerY = Math.round(height / 2);
+  const startY = Math.round(centerY - totalTextHeight / 2);
+
+  const family =
+    getFontFamily(fontFamilies.line1) ||
+    getFontFamily("sans");
+
+  const texts = safeLines.map((safeLine, index) => {
+    const y = startY + (index * lineGap);
+    return `<text x="${Math.round(width / 2)}" y="${y}" class="same-line">${safeLine}</text>`;
+  }).join("");
 
   return Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <style>
         ${getFontFaceCss()}
-        .l1, .l2, .l3 {
+        .same-line {
           fill: ${colorHex};
           text-anchor: middle;
           dominant-baseline: middle;
-        }
-        .l1 {
-          font-family: ${getFontFamily(fontFamilies.line1)};
-          font-size: ${font1}px;
+          font-family: ${family};
+          font-size: ${sharedFontSize}px;
           font-weight: 700;
         }
-        .l2 {
-          font-family: ${getFontFamily(fontFamilies.line2)};
-          font-size: ${font2}px;
-          font-weight: 600;
-        }
-        .l3 {
-          font-family: ${getFontFamily(fontFamilies.line3)};
-          font-size: ${font3}px;
-          font-weight: 600;
-        }
       </style>
-      ${safe1 ? `<text x="${Math.round(width / 2)}" y="${y1}" class="l1">${safe1}</text>` : ""}
-      ${safe2 ? `<text x="${Math.round(width / 2)}" y="${y2}" class="l2">${safe2}</text>` : ""}
-      ${safe3 ? `<text x="${Math.round(width / 2)}" y="${y3}" class="l3">${safe3}</text>` : ""}
+      ${texts}
     </svg>
   `);
 }
@@ -719,49 +731,61 @@ async function buildProductionComposite({
 
   const logoScales = normalizeLogoScale(logoScale);
 
+  const logoZoneWidth = Math.round(width * 0.20);
+  const logoBoxHeight = Math.round(height * 0.97);
+
   const leftScale = hasRight ? logoScales.left : logoScales.single;
   const rightScale = hasLeft ? logoScales.right : logoScales.single;
 
-  const leftLogoWidth = Math.round(width * 0.25 * leftScale);
-  const rightLogoWidth = Math.round(width * 0.25 * rightScale);
-  const logoBoxHeight = Math.round(height * 0.97);
+  const leftLogoWidth = Math.round(logoZoneWidth * leftScale);
+  const rightLogoWidth = Math.round(logoZoneWidth * rightScale);
 
   let textZoneLeft = 0;
   let textZoneWidth = width;
 
   if (hasLeft && !hasRight) {
-    textZoneLeft = Math.round(width * 0.25);
-    textZoneWidth = width - textZoneLeft;
+    textZoneLeft = logoZoneWidth;
+    textZoneWidth = width - logoZoneWidth;
   }
 
   if (!hasLeft && hasRight) {
     textZoneLeft = 0;
-    textZoneWidth = width - Math.round(width * 0.25);
+    textZoneWidth = width - logoZoneWidth;
   }
 
   if (hasLeft && hasRight) {
-    textZoneLeft = Math.round(width * 0.25);
-    textZoneWidth = Math.round(width * 0.50);
+    textZoneLeft = logoZoneWidth;
+    textZoneWidth = width - (logoZoneWidth * 2);
   }
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(leftLogoBuffer, leftLogoWidth, logoBoxHeight, elementColor);
+    const preparedLeftLogo = await fitLogo(
+      leftLogoBuffer,
+      leftLogoWidth,
+      logoBoxHeight,
+      elementColor
+    );
 
     composites.push({
       input: preparedLeftLogo,
-      left: 0,
+      left: Math.max(0, Math.round((logoZoneWidth - leftLogoWidth) / 2)),
       top: Math.round((height - logoBoxHeight) / 2)
     });
   }
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(rightLogoBuffer, rightLogoWidth, logoBoxHeight, elementColor);
+    const preparedRightLogo = await fitLogo(
+      rightLogoBuffer,
+      rightLogoWidth,
+      logoBoxHeight,
+      elementColor
+    );
 
     composites.push({
       input: preparedRightLogo,
-      left: width - rightLogoWidth,
+      left: width - logoZoneWidth + Math.max(0, Math.round((logoZoneWidth - rightLogoWidth) / 2)),
       top: Math.round((height - logoBoxHeight) / 2)
     });
   }
