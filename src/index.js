@@ -1103,38 +1103,6 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-// Route de test Supabase
-app.get("/test-supabase", async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from("gallery_items")
-      .insert({
-        id: `test-${Date.now()}`,
-        group_id: "test-group",
-        prompt: "test insertion",
-        category: "divers",
-        in_gallery: true,
-        image_url: "https://test.com/image.png",
-        local_url: null,
-        shopify_url: null,
-        shopify_file_id: null
-      })
-      .select();
-
-    console.log("🧪 TEST SUPABASE DATA:", data);
-    console.log("❌ TEST SUPABASE ERROR:", error);
-
-    if (error) {
-      return res.status(500).json({ ok: false, error });
-    }
-
-    return res.json({ ok: true, data });
-  } catch (e) {
-    console.error("❌ TEST SUPABASE CATCH:", e);
-    return res.status(500).json({ ok: false, message: e.message });
-  }
-});
-
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
     const { prompt, count = 3 } = req.body || {};
@@ -1442,8 +1410,6 @@ app.get("/api/gallery/random", async (req, res) => {
   }
 });
 
-console.log("🔥 VERSION TEST SUPABASE ACTIVE");
-
 // =======================
 // START
 // =======================
@@ -1459,6 +1425,4 @@ app.listen(PORT, () => {
   console.log("SHOPIFY_API_VERSION :", process.env.SHOPIFY_API_VERSION || "2025-01");
   console.log("SUPABASE_URL présent :", !!process.env.SUPABASE_URL);
   console.log("SUPABASE_SERVICE_ROLE_KEY présente :", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-  console.log("SUPABASE URL =", process.env.SUPABASE_URL);
-  console.log("SUPABASE KEY START =", process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 15));
 });
