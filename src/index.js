@@ -20,14 +20,26 @@ app.use(express.json({ limit: "20mb" }));
 
 const PORT = process.env.PORT || 3000;
 
+// =======================
+// OPENAI
+// =======================
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+// =======================
+// SUPABASE
+// =======================
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+// =======================
+// DOSSIERS
+// =======================
 
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
@@ -39,22 +51,15 @@ fs.mkdirSync(productionDir, { recursive: true });
 
 app.use("/generated", express.static(generatedDir));
 
-app.get("/", (req, res) => {
-  res.json({
-    ok: true,
-    message: "Serveur configurateur plaque en ligne"
-  });
-});
-
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
+// =======================
+// HELPERS GENERAUX
+// =======================
 
 function getBaseUrl(req) {
   return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
 }
 
-function slugify(value) {
+function slugify(value = "") {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -114,6 +119,10 @@ function pickGalleryIndex(prompt = "", items = []) {
   return hashString(seed) % items.length;
 }
 
+// =======================
+// SUPABASE HELPERS
+// =======================
+
 async function saveCreationBatch({
   prompt,
   category,
@@ -136,14 +145,19 @@ async function saveCreationBatch({
     shopify_file_id: entry.shopifyFileId || null
   }));
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("gallery_items")
-    .insert(entries);
+    .insert(entries)
+    .select();
+
+  console.log("🧪 SUPABASE BATCH INSERT DATA:", data);
+  console.log("❌ SUPABASE BATCH INSERT ERROR:", error);
 
   if (error) {
-    console.error("Erreur Supabase insert:", error);
-    throw new Error("Impossible de sauvegarder la galerie dans Supabase");
+    throw new Error(`Supabase insert failed: ${error.message}`);
   }
+
+  return data || [];
 }
 
 async function getGalleryItems({ category = "tous", limit = 60 } = {}) {
@@ -161,7 +175,7 @@ async function getGalleryItems({ category = "tous", limit = 60 } = {}) {
   const { data, error } = await query;
 
   if (error) {
-    console.error("Erreur getGalleryItems Supabase :", error);
+    console.error("❌ Erreur getGalleryItems Supabase :", error);
     throw new Error("Impossible de charger la galerie");
   }
 
@@ -175,7 +189,7 @@ async function getAllGalleryItemsForCategories() {
     .eq("in_gallery", true);
 
   if (error) {
-    console.error("Erreur catégories galerie Supabase :", error);
+    console.error("❌ Erreur catégories galerie Supabase :", error);
     throw new Error("Impossible de charger les catégories");
   }
 
@@ -190,13 +204,17 @@ async function getRandomGalleryItems(limit = 12) {
     .limit(300);
 
   if (error) {
-    console.error("Erreur getRandomGalleryItems Supabase :", error);
+    console.error("❌ Erreur getRandomGalleryItems Supabase :", error);
     throw new Error("Impossible de charger la galerie aléatoire");
   }
 
   const shuffled = [...(data || [])].sort(() => 0.5 - Math.random());
   return shuffled.slice(0, limit);
 }
+
+// =======================
+// VARIANTS / DIMENSIONS
+// =======================
 
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse": ["1.6", "3.2"],
@@ -338,6 +356,10 @@ const VARIANT_MAP = {
   }
 };
 
+// =======================
+// CATEGORIES
+// =======================
+
 const CATEGORY_RULES = [
   {
     key: "animaux",
@@ -449,6 +471,10 @@ function getGalleryCategories(items = []) {
 
   return ordered;
 }
+
+// =======================
+// PRODUCTION IMAGE HELPERS
+// =======================
 
 function hexToRgb(hex = "#111111") {
   const clean = hex.replace("#", "");
@@ -783,7 +809,7 @@ async function getShopifyAdminAccessToken() {
   if (
     shopifyTokenCache.accessToken &&
     shopifyTokenCache.expiresAt &&
-    now < shopifyTokenCache.expiresAt - 60_000
+    now < shopifyTokenCache.expiresAt - 60000
   ) {
     return shopifyTokenCache.accessToken;
   }
@@ -1062,6 +1088,53 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
   };
 }
 
+// =======================
+// ROUTES
+// =======================
+
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    message: "Serveur configurateur plaque en ligne"
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+// Route de test Supabase
+app.get("/test-supabase", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("gallery_items")
+      .insert({
+        id: `test-${Date.now()}`,
+        group_id: "test-group",
+        prompt: "test insertion",
+        category: "divers",
+        in_gallery: true,
+        image_url: "https://test.com/image.png",
+        local_url: null,
+        shopify_url: null,
+        shopify_file_id: null
+      })
+      .select();
+
+    console.log("🧪 TEST SUPABASE DATA:", data);
+    console.log("❌ TEST SUPABASE ERROR:", error);
+
+    if (error) {
+      return res.status(500).json({ ok: false, error });
+    }
+
+    return res.json({ ok: true, data });
+  } catch (e) {
+    console.error("❌ TEST SUPABASE CATCH:", e);
+    return res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
     const { prompt, count = 3 } = req.body || {};
@@ -1122,9 +1195,9 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
         );
         shopifyUrl = uploaded.url;
         shopifyFileId = uploaded.id;
-        console.log("Shopify upload OK:", shopifyUrl);
+        console.log("✅ Shopify upload OK:", shopifyUrl);
       } catch (e) {
-        console.error("Shopify upload failed:", e.message);
+        console.error("❌ Shopify upload failed:", e.message);
       }
 
       const localUrl = `${baseUrl}/generated/logos/${fileName}`;
@@ -1158,7 +1231,7 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 
     return res.json({ logos });
   } catch (error) {
-    console.error("Erreur /api/logos/search-or-generate :");
+    console.error("❌ Erreur /api/logos/search-or-generate :");
     console.error("message:", error?.message);
     console.error("status:", error?.status);
     console.error("name:", error?.name);
@@ -1249,7 +1322,7 @@ app.post("/api/render/production", async (req, res) => {
       url: `${baseUrl}/generated/production/${fileName}`
     });
   } catch (error) {
-    console.error("Erreur /api/render/production :", error);
+    console.error("❌ Erreur /api/render/production :", error);
     return res.status(500).json({
       error: error?.message || "Erreur interne génération production."
     });
@@ -1291,7 +1364,7 @@ app.post("/api/variant/resolve", async (req, res) => {
 
     return res.json(found);
   } catch (error) {
-    console.error("Erreur /api/variant/resolve :", error);
+    console.error("❌ Erreur /api/variant/resolve :", error);
     return res.status(500).json({
       error: "Erreur interne variant."
     });
@@ -1304,7 +1377,7 @@ app.get("/api/gallery/categories", async (req, res) => {
     const categories = getGalleryCategories(items);
     res.json({ categories });
   } catch (error) {
-    console.error("Erreur gallery categories :", error);
+    console.error("❌ Erreur gallery categories :", error);
     res.status(500).json({ error: "gallery categories error" });
   }
 });
@@ -1337,7 +1410,7 @@ app.get("/api/gallery", async (req, res) => {
       activeCategory: requestedCategory || "tous"
     });
   } catch (e) {
-    console.error("Erreur gallery :", e);
+    console.error("❌ Erreur gallery :", e);
     res.status(500).json({ error: "gallery error" });
   }
 });
@@ -1364,10 +1437,14 @@ app.get("/api/gallery/random", async (req, res) => {
       activeCategory: "tous"
     });
   } catch (e) {
-    console.error("Erreur gallery random :", e);
+    console.error("❌ Erreur gallery random :", e);
     res.status(500).json({ error: "gallery error" });
   }
 });
+
+// =======================
+// START
+// =======================
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
@@ -1380,4 +1457,6 @@ app.listen(PORT, () => {
   console.log("SHOPIFY_API_VERSION :", process.env.SHOPIFY_API_VERSION || "2025-01");
   console.log("SUPABASE_URL présent :", !!process.env.SUPABASE_URL);
   console.log("SUPABASE_SERVICE_ROLE_KEY présente :", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+  console.log("SUPABASE URL =", process.env.SUPABASE_URL);
+  console.log("SUPABASE KEY START =", process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 15));
 });
