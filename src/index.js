@@ -1441,9 +1441,9 @@ app.get("/api/gallery/random", async (req, res) => {
     res.status(500).json({ error: "gallery error" });
   }
 });
-app.get("/test-supabase", async (req, res) => {
-  res.json({ ok: true });
-});
+
+console.log("🔥 VERSION TEST SUPABASE ACTIVE");
+
 // =======================
 // START
 // =======================
