@@ -12,34 +12,19 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-app.use(cors({
-  origin: true
-}));
-
+app.use(cors({ origin: true }));
 app.use(express.json({ limit: "20mb" }));
 
 const PORT = process.env.PORT || 3000;
-
-// =======================
-// OPENAI
-// =======================
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// =======================
-// SUPABASE
-// =======================
-
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
-
-// =======================
-// DOSSIERS
-// =======================
 
 const generatedDir = path.join(__dirname, "..", "generated");
 const logosDir = path.join(generatedDir, "logos");
@@ -50,10 +35,6 @@ fs.mkdirSync(logosDir, { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
 
 app.use("/generated", express.static(generatedDir));
-
-// =======================
-// HELPERS GENERAUX
-// =======================
 
 function getBaseUrl(req) {
   return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`;
@@ -84,7 +65,6 @@ function normalizeThickness(value = "") {
 
 function normalizeColor(value = "") {
   const v = String(value).trim().toLowerCase();
-
   const map = {
     "acier brossé": "acier-brosse",
     "acier-brosse": "acier-brosse",
@@ -100,7 +80,6 @@ function normalizeColor(value = "") {
     "noyer": "noyer",
     "rose": "rose"
   };
-
   return map[v] || v;
 }
 
@@ -119,15 +98,7 @@ function pickGalleryIndex(prompt = "", items = []) {
   return hashString(seed) % items.length;
 }
 
-// =======================
-// SUPABASE HELPERS
-// =======================
-
-async function saveCreationBatch({
-  prompt,
-  category,
-  creations = []
-}) {
+async function saveCreationBatch({ prompt, category, creations = [] }) {
   const createdAt = new Date().toISOString();
   const groupId = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const galleryIndex = pickGalleryIndex(prompt, creations);
@@ -150,13 +121,7 @@ async function saveCreationBatch({
     .insert(entries)
     .select();
 
-  console.log("🧪 SUPABASE BATCH INSERT DATA:", data);
-  console.log("❌ SUPABASE BATCH INSERT ERROR:", error);
-
-  if (error) {
-    throw new Error(`Supabase insert failed: ${error.message}`);
-  }
-
+  if (error) throw new Error(`Supabase insert failed: ${error.message}`);
   return data || [];
 }
 
@@ -168,17 +133,10 @@ async function getGalleryItems({ category = "tous", limit = 60 } = {}) {
     .order("created_at", { ascending: false })
     .limit(limit);
 
-  if (category && category !== "tous") {
-    query = query.eq("category", category);
-  }
+  if (category && category !== "tous") query = query.eq("category", category);
 
   const { data, error } = await query;
-
-  if (error) {
-    console.error("❌ Erreur getGalleryItems Supabase :", error);
-    throw new Error("Impossible de charger la galerie");
-  }
-
+  if (error) throw new Error("Impossible de charger la galerie");
   return data || [];
 }
 
@@ -188,11 +146,7 @@ async function getAllGalleryItemsForCategories() {
     .select("category")
     .eq("in_gallery", true);
 
-  if (error) {
-    console.error("❌ Erreur catégories galerie Supabase :", error);
-    throw new Error("Impossible de charger les catégories");
-  }
-
+  if (error) throw new Error("Impossible de charger les catégories");
   return data || [];
 }
 
@@ -203,18 +157,11 @@ async function getRandomGalleryItems(limit = 12) {
     .eq("in_gallery", true)
     .limit(300);
 
-  if (error) {
-    console.error("❌ Erreur getRandomGalleryItems Supabase :", error);
-    throw new Error("Impossible de charger la galerie aléatoire");
-  }
+  if (error) throw new Error("Impossible de charger la galerie aléatoire");
 
   const shuffled = [...(data || [])].sort(() => 0.5 - Math.random());
   return shuffled.slice(0, limit);
 }
-
-// =======================
-// VARIANTS / DIMENSIONS
-// =======================
 
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse": ["1.6", "3.2"],
@@ -236,7 +183,6 @@ const DIMENSION_MAP = {
   "200x50mm": { width: 2362, height: 591 },
   "250x87mm": { width: 2953, height: 1028 },
   "300x100mm": { width: 3543, height: 1181 },
-
   "100x25": { width: 1181, height: 295 },
   "150x37": { width: 1772, height: 437 },
   "200x50": { width: 2362, height: 591 },
@@ -270,7 +216,6 @@ const VARIANT_MAP = {
       "blanc": { variantId: 53556222853447 }
     }
   },
-
   "150x37mm": {
     "1.6": {
       "acier-brosse": { variantId: 53526180462919 },
@@ -291,7 +236,6 @@ const VARIANT_MAP = {
       "blanc": { variantId: 53556222918983 }
     }
   },
-
   "200x50mm": {
     "1.6": {
       "acier-brosse": { variantId: 53526180495687 },
@@ -312,7 +256,6 @@ const VARIANT_MAP = {
       "blanc": { variantId: 53556222984519 }
     }
   },
-
   "250x87mm": {
     "1.6": {
       "acier-brosse": { variantId: 53526180528455 },
@@ -333,7 +276,6 @@ const VARIANT_MAP = {
       "blanc": { variantId: 53556223050055 }
     }
   },
-
   "300x100mm": {
     "1.6": {
       "acier-brosse": { variantId: 53526180561223 },
@@ -356,132 +298,38 @@ const VARIANT_MAP = {
   }
 };
 
-// =======================
-// CATEGORIES
-// =======================
-
 const CATEGORY_RULES = [
-  {
-    key: "animaux",
-    words: [
-      "chien", "chat", "cheval", "lion", "tigre", "lapin", "oiseau", "aigle", "serpent",
-      "rottweiler", "berger", "bouledogue", "caniche", "animaux", "animal", "panda", "poisson",
-      "requin", "éléphant", "elephant", "tortue", "papillon", "coq", "hibou"
-    ]
-  },
-  {
-    key: "sport",
-    words: [
-      "football", "foot", "basket", "tennis", "rugby", "golf", "haltère", "haltere", "musculation",
-      "fitness", "vélo", "velo", "cyclisme", "boxe", "judo", "karaté", "karate", "natation",
-      "running", "course", "sport", "ballon", "raquette", "crossfit", "marathon"
-    ]
-  },
-  {
-    key: "medical",
-    words: [
-      "pharmacie", "pharmacien", "dentiste", "dentaire", "stéthoscope", "stethoscope",
-      "croix médicale", "croix medicale", "croix pharmacie", "medecin", "médecin",
-      "infirmier", "infirmière", "infirmiere", "vétérinaire", "veterinaire", "santé", "sante",
-      "seringue", "hôpital", "hopital", "soin", "paramedical", "kiné", "kine"
-    ]
-  },
-  {
-    key: "beaute",
-    words: [
-      "coiffeur", "coiffure", "ciseaux", "ongle", "ongles", "esthétique", "esthetique",
-      "maquillage", "makeup", "beauty", "beauté", "beaute", "barbier", "barber",
-      "massage", "spa", "shampoing", "brosse", "salon"
-    ]
-  },
-  {
-    key: "restauration",
-    words: [
-      "pizza", "burger", "café", "cafe", "restaurant", "fourchette", "cuillère", "cuillere",
-      "couteau", "boulangerie", "pâtisserie", "patisserie", "croissant", "pain", "boisson",
-      "vin", "cocktail", "chef", "cuisine", "tasse"
-    ]
-  },
-  {
-    key: "batiment",
-    words: [
-      "maçon", "macon", "bâtiment", "batiment", "maison", "toit", "marteau", "clé anglaise",
-      "cle anglaise", "plombier", "électricien", "electricien", "outils", "tournevis",
-      "perceuse", "construction", "artisan", "travaux"
-    ]
-  },
-  {
-    key: "nature",
-    words: [
-      "arbre", "fleur", "montagne", "soleil", "lune", "forêt", "foret", "feuille",
-      "nature", "paysage", "nuage", "étoile", "etoile", "rose", "plante", "rivière", "riviere"
-    ]
-  },
-  {
-    key: "symboles",
-    words: [
-      "logo", "icone", "icône", "minimaliste", "symbole", "symbol", "coeur", "cœur",
-      "éclair", "eclair", "flèche", "fleche", "couronne", "croix", "badge", "blason"
-    ]
-  }
+  { key: "animaux", words: ["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou"] },
+  { key: "sport", words: ["football","foot","basket","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon"] },
+  { key: "medical", words: ["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","croix pharmacie","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine"] },
+  { key: "beaute", words: ["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon"] },
+  { key: "restauration", words: ["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse"] },
+  { key: "batiment", words: ["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux"] },
+  { key: "nature", words: ["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere"] },
+  { key: "symboles", words: ["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason"] }
 ];
 
 function detectCategory(prompt = "") {
-  const p = String(prompt || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
+  const p = String(prompt || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   for (const rule of CATEGORY_RULES) {
-    if (rule.words.some((word) => p.includes(word))) {
-      return rule.key;
-    }
+    if (rule.words.some((word) => p.includes(word))) return rule.key;
   }
-
   return "divers";
 }
 
 function getGalleryCategories(items = []) {
-  const defaultOrder = [
-    "tous",
-    "animaux",
-    "sport",
-    "medical",
-    "beaute",
-    "restauration",
-    "batiment",
-    "nature",
-    "symboles",
-    "divers"
-  ];
-
-  const existing = new Set(
-    items
-      .map((item) => item.category)
-      .filter(Boolean)
-  );
-
+  const defaultOrder = ["tous","animaux","sport","medical","beaute","restauration","batiment","nature","symboles","divers"];
+  const existing = new Set(items.map((item) => item.category).filter(Boolean));
   const ordered = defaultOrder.filter((cat) => cat === "tous" || existing.has(cat));
-
   for (const item of existing) {
-    if (!ordered.includes(item)) {
-      ordered.push(item);
-    }
+    if (!ordered.includes(item)) ordered.push(item);
   }
-
   return ordered;
 }
 
-// =======================
-// PRODUCTION IMAGE HELPERS
-// =======================
-
 function hexToRgb(hex = "#111111") {
   const clean = hex.replace("#", "");
-  const full = clean.length === 3
-    ? clean.split("").map((c) => c + c).join("")
-    : clean;
-
+  const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
   return {
     r: parseInt(full.slice(0, 2), 16),
     g: parseInt(full.slice(2, 4), 16),
@@ -491,9 +339,7 @@ function hexToRgb(hex = "#111111") {
 
 async function fetchImageBuffer(url) {
   const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Impossible de charger l'image : ${url}`);
-  }
+  if (!response.ok) throw new Error(`Impossible de charger l'image : ${url}`);
   const arrayBuffer = await response.arrayBuffer();
   return Buffer.from(arrayBuffer);
 }
@@ -632,36 +478,31 @@ function buildProductionTextSvg({
   fontFamilies = {},
   colorHex = "#111111"
 }) {
-  const lines = [line1, line2, line3]
-    .map((x) => String(x || "").trim())
-    .filter(Boolean);
+  const lines = [line1, line2, line3].map((x) => String(x || "").trim()).filter(Boolean);
 
   if (!lines.length) {
-    return Buffer.from(`
-      <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"></svg>
-    `);
+    return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"></svg>`);
   }
 
   const safeLines = lines.map(escapeXml);
   const scales = normalizeTextScale(textScale);
 
   const globalScale = Math.min(scales.line1, scales.line2, scales.line3);
-
   const lineCount = lines.length;
   const longestLineLength = Math.max(...lines.map((l) => l.length), 1);
 
   let baseFontSize;
   if (lineCount === 1) {
-    baseFontSize = height * 0.42;
+    baseFontSize = height * 0.68;
   } else if (lineCount === 2) {
-    baseFontSize = height * 0.28;
+    baseFontSize = height * 0.42;
   } else {
-    baseFontSize = height * 0.21;
+    baseFontSize = height * 0.30;
   }
 
   let widthRatio = 1;
-  if (longestLineLength > 10) {
-    widthRatio = 10 / longestLineLength;
+  if (longestLineLength > 8) {
+    widthRatio = 8 / longestLineLength;
   }
 
   const sharedFontSize = Math.max(
@@ -674,9 +515,7 @@ function buildProductionTextSvg({
   const centerY = Math.round(height / 2);
   const startY = Math.round(centerY - totalTextHeight / 2);
 
-  const family =
-    getFontFamily(fontFamilies.line1) ||
-    getFontFamily("sans");
+  const family = getFontFamily(fontFamilies.line1) || getFontFamily("sans");
 
   const texts = safeLines.map((safeLine, index) => {
     const y = startY + (index * lineGap);
@@ -760,12 +599,7 @@ async function buildProductionComposite({
 
   if (leftLogoUrl) {
     const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(
-      leftLogoBuffer,
-      leftLogoWidth,
-      logoBoxHeight,
-      elementColor
-    );
+    const preparedLeftLogo = await fitLogo(leftLogoBuffer, leftLogoWidth, logoBoxHeight, elementColor);
 
     composites.push({
       input: preparedLeftLogo,
@@ -776,12 +610,7 @@ async function buildProductionComposite({
 
   if (rightLogoUrl) {
     const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(
-      rightLogoBuffer,
-      rightLogoWidth,
-      logoBoxHeight,
-      elementColor
-    );
+    const preparedRightLogo = await fitLogo(rightLogoBuffer, rightLogoWidth, logoBoxHeight, elementColor);
 
     composites.push({
       input: preparedRightLogo,
@@ -809,10 +638,6 @@ async function buildProductionComposite({
 
   return base.composite(composites).png().toBuffer();
 }
-
-// =======================
-// SHOPIFY TOKEN + UPLOAD
-// =======================
 
 let shopifyTokenCache = {
   accessToken: null,
@@ -846,22 +671,18 @@ async function getShopifyAdminAccessToken() {
 
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString()
   });
 
   const data = await response.json();
 
   if (!response.ok || !data?.access_token) {
-    console.error("Shopify token error:", JSON.stringify(data, null, 2));
     throw new Error("Impossible d'obtenir le token Admin Shopify");
   }
 
   shopifyTokenCache.accessToken = data.access_token;
   shopifyTokenCache.expiresAt = now + ((Number(data.expires_in) || 86399) * 1000);
-
   return shopifyTokenCache.accessToken;
 }
 
@@ -869,7 +690,6 @@ async function shopifyGraphQL(query, variables = {}) {
   const shop = process.env.SHOPIFY_STORE;
   const version = process.env.SHOPIFY_API_VERSION || "2025-01";
   const accessToken = await getShopifyAdminAccessToken();
-
   const url = `https://${shop}/admin/api/${version}/graphql.json`;
 
   const res = await fetch(url, {
@@ -882,12 +702,7 @@ async function shopifyGraphQL(query, variables = {}) {
   });
 
   const data = await res.json();
-
-  if (!res.ok || data.errors) {
-    console.error("Shopify GraphQL error:", JSON.stringify(data, null, 2));
-    throw new Error("Erreur GraphQL Shopify");
-  }
-
+  if (!res.ok || data.errors) throw new Error("Erreur GraphQL Shopify");
   return data.data;
 }
 
@@ -905,25 +720,15 @@ async function getShopifyFileById(fileId) {
           alt
           fileStatus
           status
-          image {
-            url
-          }
-          preview {
-            image {
-              url
-            }
-          }
+          image { url }
+          preview { image { url } }
         }
         ... on GenericFile {
           id
           alt
           fileStatus
           url
-          preview {
-            image {
-              url
-            }
-          }
+          preview { image { url } }
         }
       }
     }
@@ -935,35 +740,17 @@ async function getShopifyFileById(fileId) {
 async function waitForShopifyFileReady(fileId, maxAttempts = 30, delayMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const file = await getShopifyFileById(fileId);
+    if (!file) throw new Error("Fichier Shopify introuvable après création");
 
-    if (!file) {
-      throw new Error("Fichier Shopify introuvable après création");
-    }
-
-    const typename = file.__typename;
     const mediaStatus = file.status || null;
     const fileStatus = file.fileStatus || null;
-
-    const finalUrl =
-      file?.image?.url ||
-      file?.preview?.image?.url ||
-      file?.url ||
-      null;
-
-    console.log(
-      `Attente fichier Shopify ${fileId} - tentative ${attempt}/${maxAttempts} - type=${typename} fileStatus=${fileStatus} status=${mediaStatus} url=${finalUrl || "null"}`
-    );
+    const finalUrl = file?.image?.url || file?.preview?.image?.url || file?.url || null;
 
     if (finalUrl) {
-      return {
-        id: file.id,
-        url: finalUrl,
-        raw: file
-      };
+      return { id: file.id, url: finalUrl, raw: file };
     }
 
     if (mediaStatus === "FAILED" || fileStatus === "FAILED") {
-      console.error("Shopify file FAILED:", file);
       throw new Error("Le traitement Shopify du fichier a échoué");
     }
 
@@ -982,15 +769,9 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
         stagedTargets {
           url
           resourceUrl
-          parameters {
-            name
-            value
-          }
+          parameters { name value }
         }
-        userErrors {
-          field
-          message
-        }
+        userErrors { field message }
       }
     }
   `, {
@@ -1006,7 +787,6 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
   const stagedPayload = staged.stagedUploadsCreate;
 
   if (stagedPayload.userErrors?.length) {
-    console.error("Shopify staged upload userErrors:", stagedPayload.userErrors);
     throw new Error(stagedPayload.userErrors[0].message || "Erreur staged upload Shopify");
   }
 
@@ -1026,8 +806,7 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
 
   if (!uploadRes.ok) {
     const text = await uploadRes.text();
-    console.error("Shopify binary upload failed:", text);
-    throw new Error("Upload binaire Shopify échoué");
+    throw new Error(`Upload binaire Shopify échoué: ${text}`);
   }
 
   const fileCreate = await shopifyGraphQL(`
@@ -1040,31 +819,18 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
             alt
             fileStatus
             status
-            image {
-              url
-            }
-            preview {
-              image {
-                url
-              }
-            }
+            image { url }
+            preview { image { url } }
           }
           ... on GenericFile {
             id
             alt
             fileStatus
             url
-            preview {
-              image {
-                url
-              }
-            }
+            preview { image { url } }
           }
         }
-        userErrors {
-          field
-          message
-        }
+        userErrors { field message }
       }
     }
   `, {
@@ -1078,16 +844,11 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
   const filePayload = fileCreate.fileCreate;
 
   if (filePayload.userErrors?.length) {
-    console.error("Shopify fileCreate userErrors:", filePayload.userErrors);
     throw new Error(filePayload.userErrors[0].message || "Erreur fileCreate Shopify");
   }
 
   const createdFile = filePayload.files?.[0];
-
-  if (!createdFile?.id) {
-    console.error("Shopify fileCreate sans id:", createdFile);
-    throw new Error("Fichier Shopify créé sans identifiant");
-  }
+  if (!createdFile?.id) throw new Error("Fichier Shopify créé sans identifiant");
 
   const immediateUrl =
     createdFile?.image?.url ||
@@ -1096,31 +857,15 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
     null;
 
   if (immediateUrl) {
-    return {
-      id: createdFile.id,
-      url: immediateUrl
-    };
+    return { id: createdFile.id, url: immediateUrl };
   }
 
-  console.log("Fichier Shopify en attente de traitement :", createdFile.id);
-
   const readyFile = await waitForShopifyFileReady(createdFile.id);
-
-  return {
-    id: readyFile.id,
-    url: readyFile.url
-  };
+  return { id: readyFile.id, url: readyFile.url };
 }
 
-// =======================
-// ROUTES
-// =======================
-
 app.get("/", (req, res) => {
-  res.json({
-    ok: true,
-    message: "Serveur configurateur plaque en ligne"
-  });
+  res.json({ ok: true, message: "Serveur configurateur plaque en ligne" });
 });
 
 app.get("/health", (req, res) => {
@@ -1180,16 +925,11 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       let shopifyFileId = null;
 
       try {
-        const uploaded = await uploadImageToShopify(
-          buffer,
-          fileName,
-          `Logo IA: ${cleanPrompt}`
-        );
+        const uploaded = await uploadImageToShopify(buffer, fileName, `Logo IA: ${cleanPrompt}`);
         shopifyUrl = uploaded.url;
         shopifyFileId = uploaded.id;
-        console.log("✅ Shopify upload OK:", shopifyUrl);
       } catch (e) {
-        console.error("❌ Shopify upload failed:", e.message);
+        console.error("Shopify upload failed:", e.message);
       }
 
       const localUrl = `${baseUrl}/generated/logos/${fileName}`;
@@ -1223,44 +963,26 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
 
     return res.json({ logos });
   } catch (error) {
-    console.error("❌ Erreur /api/logos/search-or-generate :");
-    console.error("message:", error?.message);
-    console.error("status:", error?.status);
-    console.error("name:", error?.name);
-    console.error("stack:", error?.stack);
-    console.error("full error:", error);
+    console.error("Erreur /api/logos/search-or-generate :", error);
 
     const rawMessage = String(error?.message || "").toLowerCase();
     const status = Number(error?.status || 500);
 
-    if (
-      status === 429 ||
-      rawMessage.includes("rate limit") ||
-      rawMessage.includes("too many requests")
-    ) {
+    if (status === 429 || rawMessage.includes("rate limit") || rawMessage.includes("too many requests")) {
       return res.status(429).json({
         code: "RATE_LIMIT",
         error: "La génération d’images est momentanément très sollicitée. Merci de réessayer dans quelques secondes."
       });
     }
 
-    if (
-      rawMessage.includes("quota") ||
-      rawMessage.includes("billing") ||
-      rawMessage.includes("insufficient") ||
-      rawMessage.includes("credit")
-    ) {
+    if (rawMessage.includes("quota") || rawMessage.includes("billing") || rawMessage.includes("insufficient") || rawMessage.includes("credit")) {
       return res.status(503).json({
         code: "BILLING_UNAVAILABLE",
         error: "Le service de génération d’images est momentanément indisponible."
       });
     }
 
-    if (
-      rawMessage.includes("api key") ||
-      rawMessage.includes("unauthorized") ||
-      status === 401
-    ) {
+    if (rawMessage.includes("api key") || rawMessage.includes("unauthorized") || status === 401) {
       return res.status(503).json({
         code: "AUTH_ERROR",
         error: "Le service de génération d’images est momentanément indisponible."
@@ -1314,7 +1036,7 @@ app.post("/api/render/production", async (req, res) => {
       url: `${baseUrl}/generated/production/${fileName}`
     });
   } catch (error) {
-    console.error("❌ Erreur /api/render/production :", error);
+    console.error("Erreur /api/render/production :", error);
     return res.status(500).json({
       error: error?.message || "Erreur interne génération production."
     });
@@ -1328,16 +1050,12 @@ app.post("/api/variant/resolve", async (req, res) => {
     const color = normalizeColor(req.body?.color || "");
 
     if (!dimension || !thickness || !color) {
-      return res.status(400).json({
-        error: "Dimension, épaisseur ou couleur manquante."
-      });
+      return res.status(400).json({ error: "Dimension, épaisseur ou couleur manquante." });
     }
 
     const allowedThickness = ALLOWED_THICKNESS_BY_COLOR[color];
     if (!allowedThickness) {
-      return res.status(404).json({
-        error: "Couleur introuvable."
-      });
+      return res.status(404).json({ error: "Couleur introuvable." });
     }
 
     if (!allowedThickness.includes(thickness)) {
@@ -1347,19 +1065,14 @@ app.post("/api/variant/resolve", async (req, res) => {
     }
 
     const found = VARIANT_MAP?.[dimension]?.[thickness]?.[color];
-
     if (!found) {
-      return res.status(404).json({
-        error: "Variant introuvable pour cette combinaison."
-      });
+      return res.status(404).json({ error: "Variant introuvable pour cette combinaison." });
     }
 
     return res.json(found);
   } catch (error) {
-    console.error("❌ Erreur /api/variant/resolve :", error);
-    return res.status(500).json({
-      error: "Erreur interne variant."
-    });
+    console.error("Erreur /api/variant/resolve :", error);
+    return res.status(500).json({ error: "Erreur interne variant." });
   }
 });
 
@@ -1369,7 +1082,7 @@ app.get("/api/gallery/categories", async (req, res) => {
     const categories = getGalleryCategories(items);
     res.json({ categories });
   } catch (error) {
-    console.error("❌ Erreur gallery categories :", error);
+    console.error("Erreur gallery categories :", error);
     res.status(500).json({ error: "gallery categories error" });
   }
 });
@@ -1402,7 +1115,7 @@ app.get("/api/gallery", async (req, res) => {
       activeCategory: requestedCategory || "tous"
     });
   } catch (e) {
-    console.error("❌ Erreur gallery :", e);
+    console.error("Erreur gallery :", e);
     res.status(500).json({ error: "gallery error" });
   }
 });
@@ -1429,19 +1142,14 @@ app.get("/api/gallery/random", async (req, res) => {
       activeCategory: "tous"
     });
   } catch (e) {
-    console.error("❌ Erreur gallery random :", e);
+    console.error("Erreur gallery random :", e);
     res.status(500).json({ error: "gallery error" });
   }
 });
 
-// =======================
-// START
-// =======================
-
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log("Fonts dir:", fontsDir);
-  console.log("Script font exists:", fs.existsSync(path.join(fontsDir, "script.ttf")));
   console.log("OPENAI_API_KEY présente :", !!process.env.OPENAI_API_KEY);
   console.log("SHOPIFY_STORE présent :", !!process.env.SHOPIFY_STORE);
   console.log("SHOPIFY_CLIENT_ID présent :", !!process.env.SHOPIFY_CLIENT_ID);
