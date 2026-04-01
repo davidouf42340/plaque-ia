@@ -267,9 +267,7 @@ async function uploadImageToShopify(buffer, filename, alt="") {
 
 app.get("/",       (req,res) => res.json({ ok:true, message:"Serveur configurateur plaque en ligne" }));
 app.get("/health", (req,res) => res.json({ ok:true }));
-
 app.get("/api/fonts", (req,res) => res.json({ fonts: fontFiles }));
-
 app.get("/api/fonts/debug", (req,res) => {
   try { res.json({ fontsDir, files:fs.readdirSync(fontsDir), count:fs.readdirSync(fontsDir).length }); }
   catch(e) { res.json({ error:e.message, fontsDir }); }
@@ -311,16 +309,13 @@ app.post("/api/logos/search-or-generate", async (req,res) => {
 });
 
 // ─── /api/render/production-from-image ───────────────────────────────────────
-// Reçoit le PNG base64 capturé par html2canvas côté client.
-// Traitement :
-//   1. Supprime le fond (pixels non-noirs → transparents)
-//   2. Met tous les pixels visibles en noir #111111
-//   3. Sauvegarde et uploade sur Shopify
+// Reçoit le PNG base64 capturé par html2canvas.
+// Supprime le fond clair → transparent, met les éléments en noir #111111.
 app.post("/api/render/production-from-image", async (req, res) => {
   try {
     const {
-      imageBase64,              // PNG base64 capturé par html2canvas
-      color        = "blanc",   // pour l'alt text
+      imageBase64,
+      color        = "blanc",
       dimension    = "100x25mm",
       thickness    = "1.6",
       line1        = "",
@@ -334,71 +329,68 @@ app.post("/api/render/production-from-image", async (req, res) => {
 
     const baseUrl = getBaseUrl(req);
 
-    // Décode le base64 (avec ou sans le préfixe data:image/png;base64,)
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    // ── Extraction robuste du base64 ─────────────────────────────────────────
+    let base64Data = imageBase64;
+    const commaIndex = imageBase64.indexOf(",");
+    if (commaIndex !== -1) {
+      base64Data = imageBase64.slice(commaIndex + 1);
+    }
+    // Nettoyage des caractères invalides base64
+    base64Data = base64Data.replace(/[^A-Za-z0-9+/=]/g, "");
+
+    if (!base64Data || base64Data.length < 100) {
+      return res.status(400).json({ error: "Image base64 invalide ou vide." });
+    }
+
     const inputBuffer = Buffer.from(base64Data, "base64");
+    console.log(`Production image buffer : ${inputBuffer.length} bytes`);
+
+    if (inputBuffer.length < 100) {
+      return res.status(400).json({ error: "Buffer image trop petit, capture échouée." });
+    }
 
     // ── Traitement Sharp : fond → transparent, éléments → noir ───────────────
-    // 1. On récupère les métadonnées pour connaître la taille
     const meta = await sharp(inputBuffer).metadata();
     const { width, height } = meta;
 
-    // 2. On extrait les canaux RGBA
     const { data: rawPixels } = await sharp(inputBuffer)
       .ensureAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    // 3. On traite pixel par pixel :
-    //    - Si le pixel est "clair" (fond de la plaque) → transparent
-    //    - Sinon (texte, logo) → noir opaque
-    const pixels = Buffer.from(rawPixels);
+    const pixels      = Buffer.from(rawPixels);
     const totalPixels = width * height;
 
     for (let i = 0; i < totalPixels; i++) {
-      const offset = i * 4;
-      const r = pixels[offset];
-      const g = pixels[offset + 1];
-      const b = pixels[offset + 2];
-      const a = pixels[offset + 3];
+      const o = i * 4;
+      const r = pixels[o], g = pixels[o+1], b = pixels[o+2], a = pixels[o+3];
 
-      // Pixel transparent ou presque → on garde transparent
+      // Pixel transparent → on garde transparent
       if (a < 30) {
-        pixels[offset]     = 0;
-        pixels[offset + 1] = 0;
-        pixels[offset + 2] = 0;
-        pixels[offset + 3] = 0;
+        pixels[o] = pixels[o+1] = pixels[o+2] = pixels[o+3] = 0;
         continue;
       }
 
-      // Luminosité du pixel
-      const luminosity = (r * 0.299 + g * 0.587 + b * 0.114);
+      // Luminosité
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
 
-      // Pixel clair (fond de la plaque) → transparent
-      if (luminosity > 180) {
-        pixels[offset]     = 0;
-        pixels[offset + 1] = 0;
-        pixels[offset + 2] = 0;
-        pixels[offset + 3] = 0;
+      if (lum > 180) {
+        // Fond clair → transparent
+        pixels[o] = pixels[o+1] = pixels[o+2] = pixels[o+3] = 0;
       } else {
-        // Pixel foncé (texte ou logo) → noir opaque
-        pixels[offset]     = 17;   // #111111
-        pixels[offset + 1] = 17;
-        pixels[offset + 2] = 17;
-        pixels[offset + 3] = 255;
+        // Élément foncé → noir opaque
+        pixels[o] = pixels[o+1] = pixels[o+2] = 17;
+        pixels[o+3] = 255;
       }
     }
 
-    // 4. Reconstruit le PNG depuis les pixels modifiés
     const productionBuffer = await sharp(pixels, {
       raw: { width, height, channels: 4 }
     }).png().toBuffer();
 
     // Sauvegarde locale
     const fileName = `${Date.now()}-production-${slugify(dimension)}-${slugify(color)}-${normalizeThickness(thickness)}-${Math.random().toString(36).slice(2,8)}.png`;
-    const filePath = path.join(productionDir, fileName);
-    fs.writeFileSync(filePath, productionBuffer);
-
+    fs.writeFileSync(path.join(productionDir, fileName), productionBuffer);
     const localUrl = `${baseUrl}/generated/production/${fileName}`;
 
     // Upload Shopify
@@ -425,11 +417,6 @@ app.post("/api/render/production-from-image", async (req, res) => {
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────
-
-// On garde aussi l'ancienne route pour compatibilité
-app.post("/api/render/production", async (req, res) => {
-  return res.status(301).json({ error: "Utilisez /api/render/production-from-image" });
-});
 
 app.post("/api/variant/resolve", async (req,res) => {
   try {
