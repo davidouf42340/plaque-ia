@@ -401,20 +401,6 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
     .toBuffer();
 }
 
-function normalizeTextScale(textScale = {}) {
-  const parseScale = (value, fallback) => {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(1.8, Math.max(0.6, n));
-  };
-
-  return {
-    line1: parseScale(textScale.line1, 1),
-    line2: parseScale(textScale.line2, 1),
-    line3: parseScale(textScale.line3, 1)
-  };
-}
-
 function normalizeLogoScale(logoScale = {}) {
   const parseScale = (value, fallback) => {
     const n = Number(value);
@@ -468,77 +454,92 @@ function getFontFaceCss() {
   return blocks.join("\n");
 }
 
+// ─── PRODUCTION TEXT SVG ────────────────────────────────────────────────────
+// Lit maintenant fontSize (px par ligne) envoyé par le configurateur.
+// Si fontSize est absent ou invalide, calcul auto identique à l'ancien.
 function buildProductionTextSvg({
   width,
   height,
   line1 = "",
   line2 = "",
   line3 = "",
-  textScale = {},
+  fontSize = {},      // { line1: px, line2: px, line3: px } — nouveau système
   fontFamilies = {},
   colorHex = "#111111"
 }) {
-  const lines = [line1, line2, line3].map((x) => String(x || "").trim()).filter(Boolean);
+  const rawLines = [
+    { key: "line1", text: String(line1 || "").trim() },
+    { key: "line2", text: String(line2 || "").trim() },
+    { key: "line3", text: String(line3 || "").trim() }
+  ].filter(l => l.text.length > 0);
 
-  if (!lines.length) {
+  if (!rawLines.length) {
     return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"></svg>`);
   }
 
-  const safeLines = lines.map(escapeXml);
-  const scales = normalizeTextScale(textScale);
+  const lineCount = rawLines.length;
 
-  const globalScale = Math.min(scales.line1, scales.line2, scales.line3);
-  const lineCount = lines.length;
-  const longestLineLength = Math.max(...lines.map((l) => l.length), 1);
+  // ── Calcul de la taille par ligne ──────────────────────────────────────────
+  // Ratio de conversion : les px du visuel (basé sur un viewport ~760px large)
+  // doivent être mis à l'échelle vers le canvas de production.
+  // Le visuel affiche un max-width de 760px, la zone texte peut être 60-100%.
+  // On utilise le ratio width/760 comme facteur de conversion approximatif.
+  const PREVIEW_WIDTH = 760;
+  const scaleFactor = width / PREVIEW_WIDTH;
 
-  let baseFontSize;
-  if (lineCount === 1) {
-    baseFontSize = height * 0.68;
-  } else if (lineCount === 2) {
-    baseFontSize = height * 0.42;
-  } else {
-    baseFontSize = height * 0.30;
-  }
+  const lineSizes = rawLines.map(l => {
+    const previewPx = Number(fontSize?.[l.key]);
 
-  let widthRatio = 1;
-  if (longestLineLength > 8) {
-    widthRatio = 8 / longestLineLength;
-  }
+    if (Number.isFinite(previewPx) && previewPx > 0) {
+      // Taille définie par le client dans le configurateur → on scale vers la production
+      return Math.max(Math.round(previewPx * scaleFactor), Math.round(height * 0.08));
+    }
 
-  const sharedFontSize = Math.max(
-    Math.round(baseFontSize * globalScale * widthRatio),
-    Math.round(height * 0.09)
-  );
+    // Fallback auto si pas de fontSize (compatibilité ancienne version)
+    const longestLen = Math.max(...rawLines.map(r => r.text.length), 1);
+    let base;
+    if (lineCount === 1) base = height * 0.68;
+    else if (lineCount === 2) base = height * 0.42;
+    else base = height * 0.30;
+    const widthRatio = longestLen > 8 ? 8 / longestLen : 1;
+    return Math.max(Math.round(base * widthRatio), Math.round(height * 0.09));
+  });
 
-  const lineGap = Math.round(sharedFontSize * 1.18);
-  const totalTextHeight = lineGap * (lineCount - 1);
-  const centerY = Math.round(height / 2);
-  const startY = Math.round(centerY - totalTextHeight / 2);
+  // ── Positionnement vertical centré ────────────────────────────────────────
+  // On centre le bloc de texte verticalement.
+  const lineGaps = rawLines.map((_, i) => lineSizes[i] * 1.18);
+  const totalBlockHeight = lineGaps.reduce((a, v) => a + v, 0) - lineGaps[lineGaps.length - 1] * 0.18;
+  const startY = Math.round((height - totalBlockHeight) / 2 + lineSizes[0] * 0.5);
 
-  const family = getFontFamily(fontFamilies.line1) || getFontFamily("sans");
+  // ── Construction des éléments SVG ─────────────────────────────────────────
+  const fontFaceCss = getFontFaceCss();
+  let currentY = startY;
 
-  const texts = safeLines.map((safeLine, index) => {
-    const y = startY + (index * lineGap);
-    return `<text x="${Math.round(width / 2)}" y="${y}" class="same-line">${safeLine}</text>`;
-  }).join("");
+  const textElements = rawLines.map((line, index) => {
+    const safeLine = escapeXml(line.text);
+    const fontKey = fontFamilies[line.key] || "sans";
+    const family = getFontFamily(fontKey);
+    const size = lineSizes[index];
+    const y = index === 0 ? currentY : (currentY += Math.round(lineSizes[index - 1] * 1.18));
 
-  return Buffer.from(`
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <style>
-        ${getFontFaceCss()}
-        .same-line {
-          fill: ${colorHex};
-          text-anchor: middle;
-          dominant-baseline: middle;
-          font-family: ${family};
-          font-size: ${sharedFontSize}px;
-          font-weight: 700;
-        }
-      </style>
-      ${texts}
-    </svg>
-  `);
+    return `<text
+      x="${Math.round(width / 2)}"
+      y="${y}"
+      text-anchor="middle"
+      dominant-baseline="middle"
+      font-family="${family}"
+      font-size="${size}px"
+      font-weight="700"
+      fill="${colorHex}"
+    >${safeLine}</text>`;
+  }).join("\n");
+
+  return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <style>${fontFaceCss}</style>
+    ${textElements}
+  </svg>`);
 }
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function buildProductionComposite({
   dimension = "100x25mm",
@@ -548,12 +549,14 @@ async function buildProductionComposite({
   line3 = "",
   leftLogoUrl = null,
   rightLogoUrl = null,
-  textScale = {},
+  fontSize = {},
   logoScale = {},
   fontFamilies = {}
 }) {
   const { width, height } = getCanvasSize(dimension);
-  const elementColor = getElementColor(color);
+
+  // Le fichier production est toujours en noir (pour gravure laser)
+  const elementColor = "#111111";
 
   const base = sharp({
     create: {
@@ -619,13 +622,17 @@ async function buildProductionComposite({
     });
   }
 
+  // ── Ajustement du fontSize pour la zone texte ─────────────────────────────
+  // Le scaleFactor global (width/760) est calculé dans buildProductionTextSvg.
+  // Mais la zone texte peut être < 100% de la largeur si des logos sont présents.
+  // On passe la largeur réelle de la zone texte pour que le calcul soit correct.
   const textSvg = buildProductionTextSvg({
     width: textZoneWidth,
     height,
     line1,
     line2,
     line3,
-    textScale,
+    fontSize,
     fontFamilies,
     colorHex: elementColor
   });
@@ -971,21 +978,21 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
     if (status === 429 || rawMessage.includes("rate limit") || rawMessage.includes("too many requests")) {
       return res.status(429).json({
         code: "RATE_LIMIT",
-        error: "La génération d’images est momentanément très sollicitée. Merci de réessayer dans quelques secondes."
+        error: "La génération d'images est momentanément très sollicitée. Merci de réessayer dans quelques secondes."
       });
     }
 
     if (rawMessage.includes("quota") || rawMessage.includes("billing") || rawMessage.includes("insufficient") || rawMessage.includes("credit")) {
       return res.status(503).json({
         code: "BILLING_UNAVAILABLE",
-        error: "Le service de génération d’images est momentanément indisponible."
+        error: "Le service de génération d'images est momentanément indisponible."
       });
     }
 
     if (rawMessage.includes("api key") || rawMessage.includes("unauthorized") || status === 401) {
       return res.status(503).json({
         code: "AUTH_ERROR",
-        error: "Le service de génération d’images est momentanément indisponible."
+        error: "Le service de génération d'images est momentanément indisponible."
       });
     }
 
@@ -996,6 +1003,11 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
   }
 });
 
+// ─── /api/render/production ──────────────────────────────────────────────────
+// Changements :
+//   1. Lit `fontSize` (px par ligne) au lieu de `textScale`
+//   2. Upload le fichier production sur Shopify Files et renvoie shopifyUrl
+//   3. La réponse contient { url, shopifyUrl, localUrl }
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
@@ -1007,7 +1019,7 @@ app.post("/api/render/production", async (req, res) => {
       color = "blanc",
       leftLogoUrl = null,
       rightLogoUrl = null,
-      textScale = {},
+      fontSize = {},       // ← nouveau : taille en px par ligne
       logoScale = {},
       fontFamilies = {}
     } = req.body || {};
@@ -1022,7 +1034,7 @@ app.post("/api/render/production", async (req, res) => {
       line3,
       leftLogoUrl,
       rightLogoUrl,
-      textScale,
+      fontSize,
       logoScale,
       fontFamilies
     });
@@ -1032,9 +1044,42 @@ app.post("/api/render/production", async (req, res) => {
 
     fs.writeFileSync(filePath, productionBuffer);
 
+    const localUrl = `${baseUrl}/generated/production/${fileName}`;
+
+    // ── Upload sur Shopify Files pour URL CDN pérenne ──────────────────────
+    let shopifyUrl = null;
+    let shopifyFileId = null;
+
+    try {
+      const altText = [
+        `Plaque ${dimension}`,
+        color,
+        thickness + "mm",
+        line1,
+        line2,
+        line3
+      ].filter(Boolean).join(" | ");
+
+      const uploaded = await uploadImageToShopify(
+        productionBuffer,
+        fileName,
+        altText
+      );
+
+      shopifyUrl = uploaded.url;
+      shopifyFileId = uploaded.id;
+    } catch (e) {
+      // L'upload Shopify est non-bloquant : on renvoie quand même le localUrl
+      console.error("Shopify production upload failed:", e.message);
+    }
+
     return res.json({
-      url: `${baseUrl}/generated/production/${fileName}`
+      url: shopifyUrl || localUrl,   // URL principale (Shopify si dispo, sinon locale)
+      shopifyUrl,                    // URL CDN Shopify (null si échec)
+      shopifyFileId,                 // ID fichier Shopify
+      localUrl                       // URL locale de secours
     });
+
   } catch (error) {
     console.error("Erreur /api/render/production :", error);
     return res.status(500).json({
@@ -1042,6 +1087,7 @@ app.post("/api/render/production", async (req, res) => {
     });
   }
 });
+// ─────────────────────────────────────────────────────────────────────────────
 
 app.post("/api/variant/resolve", async (req, res) => {
   try {
