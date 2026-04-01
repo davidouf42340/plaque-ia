@@ -516,6 +516,14 @@ app.get("/api/gallery/random", async (req,res) => {
     res.json({items,categories:getGalleryCategories(allForCats),activeCategory:"tous"});
   } catch(e) { console.error(e); res.status(500).json({error:"gallery error"}); }
 });
+app.get("/api/fonts/debug", (req, res) => {
+  try {
+    const files = fs.readdirSync(fontsDir);
+    res.json({ fontsDir, files, count: files.length });
+  } catch (e) {
+    res.json({ error: e.message, fontsDir });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
