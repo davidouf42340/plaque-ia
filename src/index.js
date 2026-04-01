@@ -13,7 +13,7 @@ const __dirname  = path.dirname(__filename);
 
 const app = express();
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 const PORT = process.env.PORT || 3000;
 
@@ -34,55 +34,19 @@ fs.mkdirSync(productionDir, { recursive: true });
 
 app.use("/generated", express.static(generatedDir));
 
-// ─── Enregistrement de toutes les polices ────────────────────────────────────
-// Chaque fichier TTF dans src/fonts/ est enregistré avec son nom de fichier
-// (sans extension) comme family name. Ex: "Allura-regular" → family "Allura-regular"
+// ─── Enregistrement des polices ──────────────────────────────────────────────
 const fontFiles = [
-  "Allura-regular",
-  "Amandine",
-  "Arlrdbd",
-  "Baskvill",
-  "Bernhc",
-  "Calinastiya-demo",
-  "Caribbean",
-  "Chewy-regular",
-  "Chonburi-regular",
-  "Coopbl",
-  "Dancingscript-regular",
-  "Dmserifdisplay-regular",
-  "Ea-sports-covers-sc-1-5",
-  "Electrolize-regular",
-  "Exotc350-bd-bt-bold",
-  "Fishermills",
-  "Galada-regular",
-  "Greatvibes-regular",
-  "Hujan",
-  "Juliussansone-regular",
-  "Justmeagaindownhere",
-  "Luxes",
-  "Manuscript",
-  "Marckscript-regular",
-  "Meaculpa-regular",
-  "Merienda-regular",
-  "Newrocker-regular",
-  "Parisienne-regular",
-  "Passionone-regular",
-  "Playbill",
-  "Pompiere-regular",
-  "Rammettoone-regular",
-  "Rancho-regular",
-  "Rye-regular",
-  "Sevesbrg",
-  "Stardosstencil-bold",
-  "Stardosstencil-regular",
-  "Sylfaen",
-  "Thailand",
-  "Viking-n",
-  "Waltographui",
-  "Wendyone-regular"
+  "Allura-regular","Amandine","Arlrdbd","Baskvill","Bernhc","Calinastiya-demo",
+  "Caribbean","Chewy-regular","Chonburi-regular","Coopbl","Dancingscript-regular",
+  "Dmserifdisplay-regular","Ea-sports-covers-sc-1-5","Electrolize-regular",
+  "Exotc350-bd-bt-bold","Fishermills","Galada-regular","Greatvibes-regular","Hujan",
+  "Juliussansone-regular","Justmeagaindownhere","Luxes","Manuscript","Marckscript-regular",
+  "Meaculpa-regular","Merienda-regular","Newrocker-regular","Parisienne-regular",
+  "Passionone-regular","Playbill","Pompiere-regular","Rammettoone-regular","Rancho-regular",
+  "Rye-regular","Sevesbrg","Stardosstencil-bold","Stardosstencil-regular","Sylfaen",
+  "Thailand","Viking-n","Waltographui","Wendyone-regular"
 ];
 
-// Tente TTF puis OTF
 for (const name of fontFiles) {
   const ttfPath = path.join(fontsDir, `${name}.ttf`);
   const otfPath = path.join(fontsDir, `${name}.otf`);
@@ -93,7 +57,7 @@ for (const name of fontFiles) {
     GlobalFonts.registerFromPath(otfPath, name);
     console.log(`Police enregistrée (otf) : ${name}`);
   } else {
-    console.warn(`Police introuvable : ${name}.ttf / .otf`);
+    console.warn(`Police introuvable : ${name}`);
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,11 +139,6 @@ const ALLOWED_THICKNESS_BY_COLOR = {
   "noir-brillant":["1.6"],"gris":["1.6"],"noyer":["1.6"],"rose":["1.6"]
 };
 
-const WHITE_ELEMENTS = ["noir","noir-brillant","gris","noyer","rose"];
-
-const PRODUCTION_WIDTH  = 1181;
-const PRODUCTION_HEIGHT = 295;
-
 const VARIANT_MAP = {
   "100x25mm": {
     "1.6": {"acier-brosse":{variantId:53526180430151},"or":{variantId:53556221837639},"cuivre":{variantId:53556222165319},"noir":{variantId:53556222492999},"blanc":{variantId:53556222820679},"noir-brillant":{variantId:53556223148359},"noyer":{variantId:53556223476039},"gris":{variantId:53556223803719},"rose":{variantId:53556224131399}},
@@ -228,122 +187,10 @@ function getGalleryCategories(items = []) {
   return ordered;
 }
 
-function hexToRgb(hex = "#111111") {
-  const clean = hex.replace("#","");
-  const full  = clean.length === 3 ? clean.split("").map(c=>c+c).join("") : clean;
-  return { r:parseInt(full.slice(0,2),16), g:parseInt(full.slice(2,4),16), b:parseInt(full.slice(4,6),16) };
-}
-
 async function fetchImageBuffer(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`Impossible de charger l'image : ${url}`);
   return Buffer.from(await r.arrayBuffer());
-}
-
-async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
-  const { r, g, b } = hexToRgb(colorHex);
-  const resized = await sharp(buffer).ensureAlpha().trim()
-    .resize({ width:boxWidth, height:boxHeight, fit:"contain", withoutEnlargement:true, background:{r:0,g:0,b:0,alpha:0} })
-    .png().toBuffer();
-  const meta  = await sharp(resized).metadata();
-  const logoW = meta.width || boxWidth, logoH = meta.height || boxHeight;
-  const alpha = await sharp(resized).ensureAlpha().extractChannel("alpha").toBuffer();
-  const colored = await sharp({ create:{width:logoW,height:logoH,channels:3,background:{r,g,b}} }).joinChannel(alpha).png().toBuffer();
-  const left = Math.max(0, Math.round((boxWidth-logoW)/2)), top = Math.max(0, Math.round((boxHeight-logoH)/2));
-  return sharp({ create:{width:boxWidth,height:boxHeight,channels:4,background:{r:0,g:0,b:0,alpha:0}} })
-    .composite([{ input:colored, left, top }]).png().toBuffer();
-}
-
-// ─── Mapping fontKey → family name (identique au fichier TTF sans extension) ─
-function getFontName(fontKey = "Allura-regular") {
-  // fontKey EST directement le nom du fichier sans extension
-  // Ex: "Allura-regular" → police "Allura-regular" enregistrée au démarrage
-  if (fontFiles.includes(fontKey)) return fontKey;
-  // Fallback si police inconnue
-  return fontFiles[0] || "sans-serif";
-}
-
-// ─── TEXTE PRODUCTION via @napi-rs/canvas ────────────────────────────────────
-function buildProductionTextCanvas({ width, height, line1="", line2="", line3="", fontFamilies={} }) {
-  const lines = [
-    { key:"line1", text:String(line1||"").trim() },
-    { key:"line2", text:String(line2||"").trim() },
-    { key:"line3", text:String(line3||"").trim() }
-  ].filter(l => l.text.length > 0);
-
-  const canvas = createCanvas(width, height);
-  const ctx    = canvas.getContext("2d");
-  ctx.clearRect(0, 0, width, height);
-  if (!lines.length) return canvas.toBuffer("image/png");
-
-  const lineCount = lines.length;
-
-  let baseFontSize;
-  if (lineCount === 1)      baseFontSize = height * 0.62;
-  else if (lineCount === 2) baseFontSize = height * 0.38;
-  else                      baseFontSize = height * 0.26;
-
-  const maxTextWidth = width * 0.94;
-
-  // Calcul taille optimale par dichotomie pour chaque ligne indépendamment
-  const lineFontSizes = lines.map(line => {
-    const fontName = getFontName(fontFamilies[line.key] || fontFiles[0]);
-    let lo = 10, hi = Math.round(baseFontSize);
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2);
-      ctx.font = `700 ${mid}px "${fontName}"`;
-      if (ctx.measureText(line.text).width <= maxTextWidth) lo = mid;
-      else hi = mid - 1;
-    }
-    return Math.max(lo, Math.round(height * 0.08));
-  });
-
-  // On prend la taille minimum pour que toutes les lignes rentrent
-  const fontSize = Math.min(...lineFontSizes);
-
-  const lineGap = Math.round(fontSize * 1.25);
-  const totalH  = lineGap * lineCount;
-  const startY  = Math.round((height - totalH) / 2 + fontSize * 0.82);
-
-  ctx.fillStyle    = "#111111";
-  ctx.textAlign    = "center";
-  ctx.textBaseline = "alphabetic";
-
-  lines.forEach((line, i) => {
-    const fontName = getFontName(fontFamilies[line.key] || fontFiles[0]);
-    ctx.font = `700 ${fontSize}px "${fontName}"`;
-    ctx.fillText(line.text, Math.round(width / 2), startY + i * lineGap);
-  });
-
-  return canvas.toBuffer("image/png");
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function buildProductionComposite({ line1="", line2="", line3="", leftLogoUrl=null, rightLogoUrl=null, fontFamilies={} }) {
-  const width = PRODUCTION_WIDTH, height = PRODUCTION_HEIGHT;
-  const base  = sharp({ create:{ width, height, channels:4, background:{r:0,g:0,b:0,alpha:0} } });
-  const composites = [];
-  const hasLeft = !!leftLogoUrl, hasRight = !!rightLogoUrl;
-  const logoZoneW = Math.round(width * 0.20), logoBoxH = Math.round(height * 0.97);
-
-  let textLeft = 0, textWidth = width;
-  if (hasLeft && !hasRight)  { textLeft = logoZoneW;    textWidth = width - logoZoneW; }
-  if (!hasLeft && hasRight)  { textLeft = 0;            textWidth = width - logoZoneW; }
-  if (hasLeft && hasRight)   { textLeft = logoZoneW;    textWidth = width - logoZoneW * 2; }
-
-  if (leftLogoUrl) {
-    const logo = await fitLogo(await fetchImageBuffer(leftLogoUrl), logoZoneW, logoBoxH, "#111111");
-    composites.push({ input:logo, left:0, top:Math.round((height-logoBoxH)/2) });
-  }
-  if (rightLogoUrl) {
-    const logo = await fitLogo(await fetchImageBuffer(rightLogoUrl), logoZoneW, logoBoxH, "#111111");
-    composites.push({ input:logo, left:width-logoZoneW, top:Math.round((height-logoBoxH)/2) });
-  }
-
-  const textBuffer = buildProductionTextCanvas({ width:textWidth, height, line1, line2, line3, fontFamilies });
-  composites.push({ input:textBuffer, left:textLeft, top:0 });
-
-  return base.composite(composites).png().toBuffer();
 }
 
 let shopifyTokenCache = { accessToken:null, expiresAt:0 };
@@ -421,8 +268,12 @@ async function uploadImageToShopify(buffer, filename, alt="") {
 app.get("/",       (req,res) => res.json({ ok:true, message:"Serveur configurateur plaque en ligne" }));
 app.get("/health", (req,res) => res.json({ ok:true }));
 
-// Route pour exposer la liste des polices disponibles au configurateur
 app.get("/api/fonts", (req,res) => res.json({ fonts: fontFiles }));
+
+app.get("/api/fonts/debug", (req,res) => {
+  try { res.json({ fontsDir, files:fs.readdirSync(fontsDir), count:fs.readdirSync(fontsDir).length }); }
+  catch(e) { res.json({ error:e.message, fontsDir }); }
+});
 
 app.post("/api/logos/search-or-generate", async (req,res) => {
   try {
@@ -459,25 +310,125 @@ app.post("/api/logos/search-or-generate", async (req,res) => {
   }
 });
 
-app.post("/api/render/production", async (req,res) => {
+// ─── /api/render/production-from-image ───────────────────────────────────────
+// Reçoit le PNG base64 capturé par html2canvas côté client.
+// Traitement :
+//   1. Supprime le fond (pixels non-noirs → transparents)
+//   2. Met tous les pixels visibles en noir #111111
+//   3. Sauvegarde et uploade sur Shopify
+app.post("/api/render/production-from-image", async (req, res) => {
   try {
-    const { line1="", line2="", line3="", color="blanc", dimension="100x25mm", thickness="1.6", leftLogoUrl=null, rightLogoUrl=null, fontFamilies={} } = req.body||{};
+    const {
+      imageBase64,              // PNG base64 capturé par html2canvas
+      color        = "blanc",   // pour l'alt text
+      dimension    = "100x25mm",
+      thickness    = "1.6",
+      line1        = "",
+      line2        = "",
+      line3        = ""
+    } = req.body || {};
+
+    if (!imageBase64) {
+      return res.status(400).json({ error: "imageBase64 manquant." });
+    }
+
     const baseUrl = getBaseUrl(req);
-    const productionBuffer = await buildProductionComposite({ line1, line2, line3, leftLogoUrl, rightLogoUrl, fontFamilies });
+
+    // Décode le base64 (avec ou sans le préfixe data:image/png;base64,)
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const inputBuffer = Buffer.from(base64Data, "base64");
+
+    // ── Traitement Sharp : fond → transparent, éléments → noir ───────────────
+    // 1. On récupère les métadonnées pour connaître la taille
+    const meta = await sharp(inputBuffer).metadata();
+    const { width, height } = meta;
+
+    // 2. On extrait les canaux RGBA
+    const { data: rawPixels } = await sharp(inputBuffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // 3. On traite pixel par pixel :
+    //    - Si le pixel est "clair" (fond de la plaque) → transparent
+    //    - Sinon (texte, logo) → noir opaque
+    const pixels = Buffer.from(rawPixels);
+    const totalPixels = width * height;
+
+    for (let i = 0; i < totalPixels; i++) {
+      const offset = i * 4;
+      const r = pixels[offset];
+      const g = pixels[offset + 1];
+      const b = pixels[offset + 2];
+      const a = pixels[offset + 3];
+
+      // Pixel transparent ou presque → on garde transparent
+      if (a < 30) {
+        pixels[offset]     = 0;
+        pixels[offset + 1] = 0;
+        pixels[offset + 2] = 0;
+        pixels[offset + 3] = 0;
+        continue;
+      }
+
+      // Luminosité du pixel
+      const luminosity = (r * 0.299 + g * 0.587 + b * 0.114);
+
+      // Pixel clair (fond de la plaque) → transparent
+      if (luminosity > 180) {
+        pixels[offset]     = 0;
+        pixels[offset + 1] = 0;
+        pixels[offset + 2] = 0;
+        pixels[offset + 3] = 0;
+      } else {
+        // Pixel foncé (texte ou logo) → noir opaque
+        pixels[offset]     = 17;   // #111111
+        pixels[offset + 1] = 17;
+        pixels[offset + 2] = 17;
+        pixels[offset + 3] = 255;
+      }
+    }
+
+    // 4. Reconstruit le PNG depuis les pixels modifiés
+    const productionBuffer = await sharp(pixels, {
+      raw: { width, height, channels: 4 }
+    }).png().toBuffer();
+
+    // Sauvegarde locale
     const fileName = `${Date.now()}-production-${slugify(dimension)}-${slugify(color)}-${normalizeThickness(thickness)}-${Math.random().toString(36).slice(2,8)}.png`;
-    fs.writeFileSync(path.join(productionDir,fileName), productionBuffer);
+    const filePath = path.join(productionDir, fileName);
+    fs.writeFileSync(filePath, productionBuffer);
+
     const localUrl = `${baseUrl}/generated/production/${fileName}`;
-    let shopifyUrl=null, shopifyFileId=null;
+
+    // Upload Shopify
+    let shopifyUrl = null, shopifyFileId = null;
     try {
-      const altText = [`Plaque ${dimension}`,color,thickness+"mm",line1,line2,line3].filter(Boolean).join(" | ");
-      const uploaded = await uploadImageToShopify(productionBuffer,fileName,altText);
-      shopifyUrl=uploaded.url; shopifyFileId=uploaded.id;
-    } catch(e) { console.error("Shopify production upload failed:",e.message); }
-    return res.json({ url:shopifyUrl||localUrl, shopifyUrl, shopifyFileId, localUrl });
+      const altText = [`Plaque ${dimension}`, color, thickness+"mm", line1, line2, line3].filter(Boolean).join(" | ");
+      const uploaded = await uploadImageToShopify(productionBuffer, fileName, altText);
+      shopifyUrl    = uploaded.url;
+      shopifyFileId = uploaded.id;
+    } catch(e) {
+      console.error("Shopify production upload failed:", e.message);
+    }
+
+    return res.json({
+      url:           shopifyUrl || localUrl,
+      shopifyUrl,
+      shopifyFileId,
+      localUrl
+    });
+
   } catch(error) {
-    console.error("Erreur /api/render/production :",error);
-    return res.status(500).json({ error:error?.message||"Erreur interne génération production." });
+    console.error("Erreur /api/render/production-from-image :", error);
+    return res.status(500).json({ error: error?.message || "Erreur interne génération production." });
   }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+// On garde aussi l'ancienne route pour compatibilité
+app.post("/api/render/production", async (req, res) => {
+  return res.status(301).json({ error: "Utilisez /api/render/production-from-image" });
 });
 
 app.post("/api/variant/resolve", async (req,res) => {
@@ -516,18 +467,9 @@ app.get("/api/gallery/random", async (req,res) => {
     res.json({items,categories:getGalleryCategories(allForCats),activeCategory:"tous"});
   } catch(e) { console.error(e); res.status(500).json({error:"gallery error"}); }
 });
-app.get("/api/fonts/debug", (req, res) => {
-  try {
-    const files = fs.readdirSync(fontsDir);
-    res.json({ fontsDir, files, count: files.length });
-  } catch (e) {
-    res.json({ error: e.message, fontsDir });
-  }
-});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Production canvas fixe : ${PRODUCTION_WIDTH}x${PRODUCTION_HEIGHT}px (100x25mm)`);
   console.log(`${fontFiles.length} polices configurées`);
   console.log("OPENAI_API_KEY présente :", !!process.env.OPENAI_API_KEY);
   console.log("SHOPIFY_STORE présent :", !!process.env.SHOPIFY_STORE);
