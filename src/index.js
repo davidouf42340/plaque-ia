@@ -177,6 +177,13 @@ const ALLOWED_THICKNESS_BY_COLOR = {
 
 const WHITE_ELEMENTS = ["noir", "noir-brillant", "gris", "noyer", "rose"];
 
+// ─── TAILLE FIXE PRODUCTION ─────────────────────────────────────────────────
+// Le fichier de production est TOUJOURS en 100x25mm (1181x295px).
+// La boutique agrandit ensuite ce fichier selon la taille commandée.
+const PRODUCTION_WIDTH  = 1181;
+const PRODUCTION_HEIGHT = 295;
+// ─────────────────────────────────────────────────────────────────────────────
+
 const DIMENSION_MAP = {
   "100x25mm": { width: 1181, height: 295 },
   "150x37mm": { width: 1772, height: 437 },
@@ -344,10 +351,6 @@ async function fetchImageBuffer(url) {
   return Buffer.from(arrayBuffer);
 }
 
-function getElementColor(color = "blanc") {
-  return WHITE_ELEMENTS.includes(normalizeColor(color)) ? "#ffffff" : "#111111";
-}
-
 async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
   const { r, g, b } = hexToRgb(colorHex);
 
@@ -401,20 +404,6 @@ async function fitLogo(buffer, boxWidth, boxHeight, colorHex = "#111111") {
     .toBuffer();
 }
 
-function normalizeLogoScale(logoScale = {}) {
-  const parseScale = (value, fallback) => {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(1.0, Math.max(0.4, n));
-  };
-
-  return {
-    single: parseScale(logoScale.single, 1),
-    left: parseScale(logoScale.left, 1),
-    right: parseScale(logoScale.right, 1)
-  };
-}
-
 function escapeXml(str = "") {
   return String(str)
     .replaceAll("&", "&amp;")
@@ -438,7 +427,6 @@ function getFontFamily(fontKey = "sans") {
 function getFontFaceCss() {
   const scriptPath = path.join(fontsDir, "script.ttf");
   const blocks = [];
-
   if (fs.existsSync(scriptPath)) {
     const scriptUrl = `file://${scriptPath.replace(/\\/g, "/")}`;
     blocks.push(`
@@ -450,87 +438,75 @@ function getFontFaceCss() {
       }
     `);
   }
-
   return blocks.join("\n");
 }
 
-// ─── PRODUCTION TEXT SVG ────────────────────────────────────────────────────
-// Lit maintenant fontSize (px par ligne) envoyé par le configurateur.
-// Si fontSize est absent ou invalide, calcul auto identique à l'ancien.
+// ─── TEXTE PRODUCTION ────────────────────────────────────────────────────────
+// Taille toujours calculée automatiquement pour remplir au mieux la zone texte.
+// fontSize et textScale sont ignorés — la production est indépendante du visuel.
 function buildProductionTextSvg({
-  width,
-  height,
+  width,           // largeur de la zone texte (pas la plaque entière)
+  height,          // hauteur de la plaque (PRODUCTION_HEIGHT = 295)
   line1 = "",
   line2 = "",
   line3 = "",
-  fontSize = {},      // { line1: px, line2: px, line3: px } — nouveau système
-  fontFamilies = {},
-  colorHex = "#111111"
+  fontFamilies = {}
 }) {
-  const rawLines = [
+  const lines = [
     { key: "line1", text: String(line1 || "").trim() },
     { key: "line2", text: String(line2 || "").trim() },
     { key: "line3", text: String(line3 || "").trim() }
   ].filter(l => l.text.length > 0);
 
-  if (!rawLines.length) {
+  if (!lines.length) {
     return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"></svg>`);
   }
 
-  const lineCount = rawLines.length;
+  const lineCount = lines.length;
+  const longestLen = Math.max(...lines.map(l => l.text.length), 1);
 
-  // ── Calcul de la taille par ligne ──────────────────────────────────────────
-  // Ratio de conversion : les px du visuel (basé sur un viewport ~760px large)
-  // doivent être mis à l'échelle vers le canvas de production.
-  // Le visuel affiche un max-width de 760px, la zone texte peut être 60-100%.
-  // On utilise le ratio width/760 comme facteur de conversion approximatif.
-  const PREVIEW_WIDTH = 760;
-  const scaleFactor = width / PREVIEW_WIDTH;
+  // ── Taille de base selon nombre de lignes ─────────────────────────────────
+  // Basé sur la hauteur réelle du canvas (295px pour 100x25mm)
+  let baseFontSize;
+  if (lineCount === 1) baseFontSize = height * 0.62;
+  else if (lineCount === 2) baseFontSize = height * 0.38;
+  else baseFontSize = height * 0.26;
 
-  const lineSizes = rawLines.map(l => {
-    const previewPx = Number(fontSize?.[l.key]);
+  // ── Réduction si texte long pour éviter le débordement horizontal ─────────
+  // Estimation : chaque caractère fait ~0.6x la taille de police en largeur
+  // avec Arial Black. On réduit si le texte dépasse 90% de la largeur disponible.
+  const charWidthRatio = 0.62; // ratio largeur/hauteur d'un caractère Arial Black
+  const maxTextWidth   = width * 0.95;
+  const estimatedWidth = longestLen * baseFontSize * charWidthRatio;
 
-    if (Number.isFinite(previewPx) && previewPx > 0) {
-      // Taille définie par le client dans le configurateur → on scale vers la production
-      return Math.max(Math.round(previewPx * scaleFactor), Math.round(height * 0.08));
-    }
+  let fontSize = baseFontSize;
+  if (estimatedWidth > maxTextWidth) {
+    fontSize = Math.floor(maxTextWidth / (longestLen * charWidthRatio));
+  }
 
-    // Fallback auto si pas de fontSize (compatibilité ancienne version)
-    const longestLen = Math.max(...rawLines.map(r => r.text.length), 1);
-    let base;
-    if (lineCount === 1) base = height * 0.68;
-    else if (lineCount === 2) base = height * 0.42;
-    else base = height * 0.30;
-    const widthRatio = longestLen > 8 ? 8 / longestLen : 1;
-    return Math.max(Math.round(base * widthRatio), Math.round(height * 0.09));
-  });
+  // Taille minimum garantie
+  fontSize = Math.max(fontSize, Math.round(height * 0.08));
 
-  // ── Positionnement vertical centré ────────────────────────────────────────
-  // On centre le bloc de texte verticalement.
-  const lineGaps = rawLines.map((_, i) => lineSizes[i] * 1.18);
-  const totalBlockHeight = lineGaps.reduce((a, v) => a + v, 0) - lineGaps[lineGaps.length - 1] * 0.18;
-  const startY = Math.round((height - totalBlockHeight) / 2 + lineSizes[0] * 0.5);
+  // ── Espacement vertical centré ────────────────────────────────────────────
+  const lineGap       = Math.round(fontSize * 1.2);
+  const totalHeight   = lineGap * lineCount - (lineGap - fontSize); // approximation
+  const startY        = Math.round((height - totalHeight) / 2 + fontSize * 0.85);
 
-  // ── Construction des éléments SVG ─────────────────────────────────────────
+  // ── Construction SVG ──────────────────────────────────────────────────────
   const fontFaceCss = getFontFaceCss();
-  let currentY = startY;
 
-  const textElements = rawLines.map((line, index) => {
-    const safeLine = escapeXml(line.text);
-    const fontKey = fontFamilies[line.key] || "sans";
-    const family = getFontFamily(fontKey);
-    const size = lineSizes[index];
-    const y = index === 0 ? currentY : (currentY += Math.round(lineSizes[index - 1] * 1.18));
-
+  const textElements = lines.map((line, i) => {
+    const safeLine  = escapeXml(line.text);
+    const family    = getFontFamily(fontFamilies[line.key] || "sans");
+    const y         = startY + i * lineGap;
     return `<text
       x="${Math.round(width / 2)}"
       y="${y}"
       text-anchor="middle"
-      dominant-baseline="middle"
       font-family="${family}"
-      font-size="${size}px"
+      font-size="${fontSize}px"
       font-weight="700"
-      fill="${colorHex}"
+      fill="#111111"
     >${safeLine}</text>`;
   }).join("\n");
 
@@ -541,22 +517,18 @@ function buildProductionTextSvg({
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── COMPOSITE PRODUCTION ────────────────────────────────────────────────────
+// Toujours 1181x295 (100x25mm), logos à 100% de leur zone, texte auto.
 async function buildProductionComposite({
-  dimension = "100x25mm",
-  color = "blanc",
   line1 = "",
   line2 = "",
   line3 = "",
-  leftLogoUrl = null,
+  leftLogoUrl  = null,
   rightLogoUrl = null,
-  fontSize = {},
-  logoScale = {},
   fontFamilies = {}
 }) {
-  const { width, height } = getCanvasSize(dimension);
-
-  // Le fichier production est toujours en noir (pour gravure laser)
-  const elementColor = "#111111";
+  const width  = PRODUCTION_WIDTH;   // 1181
+  const height = PRODUCTION_HEIGHT;  // 295
 
   const base = sharp({
     create: {
@@ -567,93 +539,65 @@ async function buildProductionComposite({
     }
   });
 
-  const composites = [];
-  const hasLeft = !!leftLogoUrl;
-  const hasRight = !!rightLogoUrl;
+  const composites  = [];
+  const hasLeft     = !!leftLogoUrl;
+  const hasRight    = !!rightLogoUrl;
 
-  const logoScales = normalizeLogoScale(logoScale);
+  // Logo = 20% de la largeur totale, 97% de la hauteur
+  const logoZoneW   = Math.round(width * 0.20);  // 236px
+  const logoBoxH    = Math.round(height * 0.97);  // 286px
 
-  const logoZoneWidth = Math.round(width * 0.20);
-  const logoBoxHeight = Math.round(height * 0.97);
+  // Zone texte
+  let textLeft  = 0;
+  let textWidth = width;
 
-  const leftScale = hasRight ? logoScales.left : logoScales.single;
-  const rightScale = hasLeft ? logoScales.right : logoScales.single;
+  if (hasLeft && !hasRight)  { textLeft = logoZoneW;          textWidth = width - logoZoneW; }
+  if (!hasLeft && hasRight)  { textLeft = 0;                  textWidth = width - logoZoneW; }
+  if (hasLeft && hasRight)   { textLeft = logoZoneW;          textWidth = width - logoZoneW * 2; }
 
-  const leftLogoWidth = Math.round(logoZoneWidth * leftScale);
-  const rightLogoWidth = Math.round(logoZoneWidth * rightScale);
-
-  let textZoneLeft = 0;
-  let textZoneWidth = width;
-
-  if (hasLeft && !hasRight) {
-    textZoneLeft = logoZoneWidth;
-    textZoneWidth = width - logoZoneWidth;
-  }
-
-  if (!hasLeft && hasRight) {
-    textZoneLeft = 0;
-    textZoneWidth = width - logoZoneWidth;
-  }
-
-  if (hasLeft && hasRight) {
-    textZoneLeft = logoZoneWidth;
-    textZoneWidth = width - (logoZoneWidth * 2);
-  }
-
+  // ── Logo gauche ───────────────────────────────────────────────────────────
   if (leftLogoUrl) {
-    const leftLogoBuffer = await fetchImageBuffer(leftLogoUrl);
-    const preparedLeftLogo = await fitLogo(leftLogoBuffer, leftLogoWidth, logoBoxHeight, elementColor);
-
+    const buf  = await fetchImageBuffer(leftLogoUrl);
+    const logo = await fitLogo(buf, logoZoneW, logoBoxH, "#111111");
     composites.push({
-      input: preparedLeftLogo,
-      left: Math.max(0, Math.round((logoZoneWidth - leftLogoWidth) / 2)),
-      top: Math.round((height - logoBoxHeight) / 2)
+      input: logo,
+      left:  0,
+      top:   Math.round((height - logoBoxH) / 2)
     });
   }
 
+  // ── Logo droit ────────────────────────────────────────────────────────────
   if (rightLogoUrl) {
-    const rightLogoBuffer = await fetchImageBuffer(rightLogoUrl);
-    const preparedRightLogo = await fitLogo(rightLogoBuffer, rightLogoWidth, logoBoxHeight, elementColor);
-
+    const buf  = await fetchImageBuffer(rightLogoUrl);
+    const logo = await fitLogo(buf, logoZoneW, logoBoxH, "#111111");
     composites.push({
-      input: preparedRightLogo,
-      left: width - logoZoneWidth + Math.max(0, Math.round((logoZoneWidth - rightLogoWidth) / 2)),
-      top: Math.round((height - logoBoxHeight) / 2)
+      input: logo,
+      left:  width - logoZoneW,
+      top:   Math.round((height - logoBoxH) / 2)
     });
   }
 
-  // ── Ajustement du fontSize pour la zone texte ─────────────────────────────
-  // Le scaleFactor global (width/760) est calculé dans buildProductionTextSvg.
-  // Mais la zone texte peut être < 100% de la largeur si des logos sont présents.
-  // On passe la largeur réelle de la zone texte pour que le calcul soit correct.
+  // ── Texte centré dans sa zone ─────────────────────────────────────────────
   const textSvg = buildProductionTextSvg({
-    width: textZoneWidth,
+    width:  textWidth,
     height,
     line1,
     line2,
     line3,
-    fontSize,
-    fontFamilies,
-    colorHex: elementColor
+    fontFamilies
   });
 
-  composites.push({
-    input: textSvg,
-    left: textZoneLeft,
-    top: 0
-  });
+  composites.push({ input: textSvg, left: textLeft, top: 0 });
 
   return base.composite(composites).png().toBuffer();
 }
+// ─────────────────────────────────────────────────────────────────────────────
 
-let shopifyTokenCache = {
-  accessToken: null,
-  expiresAt: 0
-};
+let shopifyTokenCache = { accessToken: null, expiresAt: 0 };
 
 async function getShopifyAdminAccessToken() {
-  const shop = process.env.SHOPIFY_STORE;
-  const clientId = process.env.SHOPIFY_CLIENT_ID;
+  const shop         = process.env.SHOPIFY_STORE;
+  const clientId     = process.env.SHOPIFY_CLIENT_ID;
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
 
   if (!shop || !clientId || !clientSecret) {
@@ -661,12 +605,7 @@ async function getShopifyAdminAccessToken() {
   }
 
   const now = Date.now();
-
-  if (
-    shopifyTokenCache.accessToken &&
-    shopifyTokenCache.expiresAt &&
-    now < shopifyTokenCache.expiresAt - 60000
-  ) {
+  if (shopifyTokenCache.accessToken && shopifyTokenCache.expiresAt && now < shopifyTokenCache.expiresAt - 60000) {
     return shopifyTokenCache.accessToken;
   }
 
@@ -683,28 +622,22 @@ async function getShopifyAdminAccessToken() {
   });
 
   const data = await response.json();
-
-  if (!response.ok || !data?.access_token) {
-    throw new Error("Impossible d'obtenir le token Admin Shopify");
-  }
+  if (!response.ok || !data?.access_token) throw new Error("Impossible d'obtenir le token Admin Shopify");
 
   shopifyTokenCache.accessToken = data.access_token;
-  shopifyTokenCache.expiresAt = now + ((Number(data.expires_in) || 86399) * 1000);
+  shopifyTokenCache.expiresAt   = now + ((Number(data.expires_in) || 86399) * 1000);
   return shopifyTokenCache.accessToken;
 }
 
 async function shopifyGraphQL(query, variables = {}) {
-  const shop = process.env.SHOPIFY_STORE;
-  const version = process.env.SHOPIFY_API_VERSION || "2025-01";
+  const shop        = process.env.SHOPIFY_STORE;
+  const version     = process.env.SHOPIFY_API_VERSION || "2025-01";
   const accessToken = await getShopifyAdminAccessToken();
-  const url = `https://${shop}/admin/api/${version}/graphql.json`;
+  const url         = `https://${shop}/admin/api/${version}/graphql.json`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": accessToken
-    },
+    headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": accessToken },
     body: JSON.stringify({ query, variables })
   });
 
@@ -713,9 +646,7 @@ async function shopifyGraphQL(query, variables = {}) {
   return data.data;
 }
 
-async function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+async function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function getShopifyFileById(fileId) {
   const data = await shopifyGraphQL(`
@@ -723,47 +654,31 @@ async function getShopifyFileById(fileId) {
       node(id: $id) {
         __typename
         ... on MediaImage {
-          id
-          alt
-          fileStatus
-          status
+          id alt fileStatus status
           image { url }
           preview { image { url } }
         }
         ... on GenericFile {
-          id
-          alt
-          fileStatus
-          url
+          id alt fileStatus url
           preview { image { url } }
         }
       }
     }
   `, { id: fileId });
-
   return data?.node || null;
 }
 
 async function waitForShopifyFileReady(fileId, maxAttempts = 30, delayMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const file = await getShopifyFileById(fileId);
+    const file     = await getShopifyFileById(fileId);
     if (!file) throw new Error("Fichier Shopify introuvable après création");
 
-    const mediaStatus = file.status || null;
-    const fileStatus = file.fileStatus || null;
     const finalUrl = file?.image?.url || file?.preview?.image?.url || file?.url || null;
+    if (finalUrl) return { id: file.id, url: finalUrl, raw: file };
 
-    if (finalUrl) {
-      return { id: file.id, url: finalUrl, raw: file };
-    }
-
-    if (mediaStatus === "FAILED" || fileStatus === "FAILED") {
-      throw new Error("Le traitement Shopify du fichier a échoué");
-    }
-
+    if (file.status === "FAILED" || file.fileStatus === "FAILED") throw new Error("Le traitement Shopify du fichier a échoué");
     await wait(delayMs);
   }
-
   throw new Error("Timeout en attente de l'URL Shopify");
 }
 
@@ -773,124 +688,63 @@ async function uploadImageToShopify(buffer, filename, alt = "") {
   const staged = await shopifyGraphQL(`
     mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
       stagedUploadsCreate(input: $input) {
-        stagedTargets {
-          url
-          resourceUrl
-          parameters { name value }
-        }
+        stagedTargets { url resourceUrl parameters { name value } }
         userErrors { field message }
       }
     }
   `, {
-    input: [{
-      filename,
-      mimeType,
-      httpMethod: "POST",
-      resource: "FILE",
-      fileSize: String(buffer.length)
-    }]
+    input: [{ filename, mimeType, httpMethod: "POST", resource: "FILE", fileSize: String(buffer.length) }]
   });
 
   const stagedPayload = staged.stagedUploadsCreate;
-
-  if (stagedPayload.userErrors?.length) {
-    throw new Error(stagedPayload.userErrors[0].message || "Erreur staged upload Shopify");
-  }
+  if (stagedPayload.userErrors?.length) throw new Error(stagedPayload.userErrors[0].message);
 
   const target = stagedPayload.stagedTargets[0];
-  const form = new FormData();
-
-  target.parameters.forEach((p) => {
-    form.append(p.name, p.value);
-  });
-
+  const form   = new FormData();
+  target.parameters.forEach((p) => form.append(p.name, p.value));
   form.append("file", new Blob([buffer], { type: mimeType }), filename);
 
-  const uploadRes = await fetch(target.url, {
-    method: "POST",
-    body: form
-  });
-
-  if (!uploadRes.ok) {
-    const text = await uploadRes.text();
-    throw new Error(`Upload binaire Shopify échoué: ${text}`);
-  }
+  const uploadRes = await fetch(target.url, { method: "POST", body: form });
+  if (!uploadRes.ok) { const text = await uploadRes.text(); throw new Error(`Upload Shopify échoué: ${text}`); }
 
   const fileCreate = await shopifyGraphQL(`
     mutation fileCreate($files: [FileCreateInput!]!) {
       fileCreate(files: $files) {
         files {
           __typename
-          ... on MediaImage {
-            id
-            alt
-            fileStatus
-            status
-            image { url }
-            preview { image { url } }
-          }
-          ... on GenericFile {
-            id
-            alt
-            fileStatus
-            url
-            preview { image { url } }
-          }
+          ... on MediaImage { id alt fileStatus status image { url } preview { image { url } } }
+          ... on GenericFile { id alt fileStatus url preview { image { url } } }
         }
         userErrors { field message }
       }
     }
-  `, {
-    files: [{
-      alt,
-      contentType: "IMAGE",
-      originalSource: target.resourceUrl
-    }]
-  });
+  `, { files: [{ alt, contentType: "IMAGE", originalSource: target.resourceUrl }] });
 
   const filePayload = fileCreate.fileCreate;
+  if (filePayload.userErrors?.length) throw new Error(filePayload.userErrors[0].message);
 
-  if (filePayload.userErrors?.length) {
-    throw new Error(filePayload.userErrors[0].message || "Erreur fileCreate Shopify");
-  }
-
-  const createdFile = filePayload.files?.[0];
+  const createdFile  = filePayload.files?.[0];
   if (!createdFile?.id) throw new Error("Fichier Shopify créé sans identifiant");
 
-  const immediateUrl =
-    createdFile?.image?.url ||
-    createdFile?.preview?.image?.url ||
-    createdFile?.url ||
-    null;
-
-  if (immediateUrl) {
-    return { id: createdFile.id, url: immediateUrl };
-  }
+  const immediateUrl = createdFile?.image?.url || createdFile?.preview?.image?.url || createdFile?.url || null;
+  if (immediateUrl) return { id: createdFile.id, url: immediateUrl };
 
   const readyFile = await waitForShopifyFileReady(createdFile.id);
   return { id: readyFile.id, url: readyFile.url };
 }
 
-app.get("/", (req, res) => {
-  res.json({ ok: true, message: "Serveur configurateur plaque en ligne" });
-});
+// ─── ROUTES ──────────────────────────────────────────────────────────────────
 
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
+app.get("/", (req, res) => res.json({ ok: true, message: "Serveur configurateur plaque en ligne" }));
+app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.post("/api/logos/search-or-generate", async (req, res) => {
   try {
     const { prompt, count = 3 } = req.body || {};
     const cleanPrompt = String(prompt || "").trim();
-    const imageCount = Math.max(1, Math.min(Number(count) || 3, 3));
+    const imageCount  = Math.max(1, Math.min(Number(count) || 3, 3));
 
-    if (!cleanPrompt) {
-      return res.status(400).json({
-        code: "MISSING_PROMPT",
-        error: "Prompt image manquant."
-      });
-    }
+    if (!cleanPrompt) return res.status(400).json({ code: "MISSING_PROMPT", error: "Prompt image manquant." });
 
     const baseUrl = getBaseUrl(req);
 
@@ -913,9 +767,9 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       n: imageCount
     });
 
-    const logos = [];
-    const creationsToSave = [];
-    const category = detectCategory(cleanPrompt);
+    const logos            = [];
+    const creationsToSave  = [];
+    const category         = detectCategory(cleanPrompt);
 
     for (let i = 0; i < (result.data || []).length; i += 1) {
       const item = result.data[i];
@@ -924,16 +778,16 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       const fileBase = `${Date.now()}-${slugify(cleanPrompt)}-${i + 1}`;
       const fileName = `${fileBase}.png`;
       const filePath = path.join(logosDir, fileName);
-      const buffer = Buffer.from(item.b64_json, "base64");
+      const buffer   = Buffer.from(item.b64_json, "base64");
 
       fs.writeFileSync(filePath, buffer);
 
-      let shopifyUrl = null;
+      let shopifyUrl    = null;
       let shopifyFileId = null;
 
       try {
         const uploaded = await uploadImageToShopify(buffer, fileName, `Logo IA: ${cleanPrompt}`);
-        shopifyUrl = uploaded.url;
+        shopifyUrl    = uploaded.url;
         shopifyFileId = uploaded.id;
       } catch (e) {
         console.error("Shopify upload failed:", e.message);
@@ -942,149 +796,89 @@ app.post("/api/logos/search-or-generate", async (req, res) => {
       const localUrl = `${baseUrl}/generated/logos/${fileName}`;
       const finalUrl = shopifyUrl || localUrl;
 
-      creationsToSave.push({
-        fileBase,
-        imageUrl: finalUrl,
-        localUrl,
-        shopifyUrl,
-        shopifyFileId
-      });
-
-      logos.push({
-        id: fileBase,
-        url: finalUrl,
-        localUrl,
-        shopifyUrl,
-        shopifyFileId,
-        category
-      });
+      creationsToSave.push({ fileBase, imageUrl: finalUrl, localUrl, shopifyUrl, shopifyFileId });
+      logos.push({ id: fileBase, url: finalUrl, localUrl, shopifyUrl, shopifyFileId, category });
     }
 
     if (creationsToSave.length) {
-      await saveCreationBatch({
-        prompt: cleanPrompt,
-        category,
-        creations: creationsToSave
-      });
+      await saveCreationBatch({ prompt: cleanPrompt, category, creations: creationsToSave });
     }
 
     return res.json({ logos });
   } catch (error) {
     console.error("Erreur /api/logos/search-or-generate :", error);
-
     const rawMessage = String(error?.message || "").toLowerCase();
-    const status = Number(error?.status || 500);
-
-    if (status === 429 || rawMessage.includes("rate limit") || rawMessage.includes("too many requests")) {
-      return res.status(429).json({
-        code: "RATE_LIMIT",
-        error: "La génération d'images est momentanément très sollicitée. Merci de réessayer dans quelques secondes."
-      });
-    }
-
-    if (rawMessage.includes("quota") || rawMessage.includes("billing") || rawMessage.includes("insufficient") || rawMessage.includes("credit")) {
-      return res.status(503).json({
-        code: "BILLING_UNAVAILABLE",
-        error: "Le service de génération d'images est momentanément indisponible."
-      });
-    }
-
-    if (rawMessage.includes("api key") || rawMessage.includes("unauthorized") || status === 401) {
-      return res.status(503).json({
-        code: "AUTH_ERROR",
-        error: "Le service de génération d'images est momentanément indisponible."
-      });
-    }
-
-    return res.status(500).json({
-      code: "GENERIC_GENERATION_ERROR",
-      error: "Une erreur est survenue lors de la génération des images. Merci de réessayer."
-    });
+    const status     = Number(error?.status || 500);
+    if (status === 429 || rawMessage.includes("rate limit") || rawMessage.includes("too many requests")) return res.status(429).json({ code: "RATE_LIMIT", error: "La génération d'images est momentanément très sollicitée. Merci de réessayer dans quelques secondes." });
+    if (rawMessage.includes("quota") || rawMessage.includes("billing") || rawMessage.includes("insufficient") || rawMessage.includes("credit")) return res.status(503).json({ code: "BILLING_UNAVAILABLE", error: "Le service de génération d'images est momentanément indisponible." });
+    if (rawMessage.includes("api key") || rawMessage.includes("unauthorized") || status === 401) return res.status(503).json({ code: "AUTH_ERROR", error: "Le service de génération d'images est momentanément indisponible." });
+    return res.status(500).json({ code: "GENERIC_GENERATION_ERROR", error: "Une erreur est survenue lors de la génération des images. Merci de réessayer." });
   }
 });
 
 // ─── /api/render/production ──────────────────────────────────────────────────
-// Changements :
-//   1. Lit `fontSize` (px par ligne) au lieu de `textScale`
-//   2. Upload le fichier production sur Shopify Files et renvoie shopifyUrl
-//   3. La réponse contient { url, shopifyUrl, localUrl }
+// - Taille FIXE 1181x295 (100x25mm) quelle que soit la dimension commandée
+// - fontSize / textScale / logoScale ignorés — texte calculé automatiquement
+// - Upload sur Shopify Files → renvoie { url, shopifyUrl, localUrl }
 app.post("/api/render/production", async (req, res) => {
   try {
     const {
-      line1 = "",
-      line2 = "",
-      line3 = "",
-      dimension = "100x25mm",
-      thickness = "1.6",
-      color = "blanc",
-      leftLogoUrl = null,
+      line1        = "",
+      line2        = "",
+      line3        = "",
+      color        = "blanc",   // gardé pour l'alt text Shopify
+      dimension    = "100x25mm",// gardé pour l'alt text Shopify
+      thickness    = "1.6",     // gardé pour l'alt text Shopify
+      leftLogoUrl  = null,
       rightLogoUrl = null,
-      fontSize = {},       // ← nouveau : taille en px par ligne
-      logoScale = {},
       fontFamilies = {}
+      // fontSize, textScale, logoScale → ignorés volontairement
     } = req.body || {};
 
     const baseUrl = getBaseUrl(req);
 
+    // Génération toujours en 1181x295
     const productionBuffer = await buildProductionComposite({
-      dimension,
-      color,
       line1,
       line2,
       line3,
       leftLogoUrl,
       rightLogoUrl,
-      fontSize,
-      logoScale,
       fontFamilies
     });
 
     const fileName = `${Date.now()}-production-${slugify(dimension)}-${slugify(color)}-${normalizeThickness(thickness)}-${Math.random().toString(36).slice(2, 8)}.png`;
     const filePath = path.join(productionDir, fileName);
-
     fs.writeFileSync(filePath, productionBuffer);
 
     const localUrl = `${baseUrl}/generated/production/${fileName}`;
 
-    // ── Upload sur Shopify Files pour URL CDN pérenne ──────────────────────
-    let shopifyUrl = null;
+    // Upload Shopify (non-bloquant)
+    let shopifyUrl    = null;
     let shopifyFileId = null;
 
     try {
-      const altText = [
-        `Plaque ${dimension}`,
-        color,
-        thickness + "mm",
-        line1,
-        line2,
-        line3
+      const altText  = [
+        `Plaque ${dimension}`, color, thickness + "mm", line1, line2, line3
       ].filter(Boolean).join(" | ");
 
-      const uploaded = await uploadImageToShopify(
-        productionBuffer,
-        fileName,
-        altText
-      );
-
-      shopifyUrl = uploaded.url;
-      shopifyFileId = uploaded.id;
+      const uploaded = await uploadImageToShopify(productionBuffer, fileName, altText);
+      shopifyUrl     = uploaded.url;
+      shopifyFileId  = uploaded.id;
     } catch (e) {
-      // L'upload Shopify est non-bloquant : on renvoie quand même le localUrl
       console.error("Shopify production upload failed:", e.message);
     }
 
     return res.json({
-      url: shopifyUrl || localUrl,   // URL principale (Shopify si dispo, sinon locale)
-      shopifyUrl,                    // URL CDN Shopify (null si échec)
-      shopifyFileId,                 // ID fichier Shopify
-      localUrl                       // URL locale de secours
+      url:           shopifyUrl || localUrl,
+      shopifyUrl,
+      shopifyFileId,
+      localUrl
     });
 
   } catch (error) {
     console.error("Erreur /api/render/production :", error);
-    return res.status(500).json({
-      error: error?.message || "Erreur interne génération production."
-    });
+    return res.status(500).json({ error: error?.message || "Erreur interne génération production." });
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1093,27 +887,16 @@ app.post("/api/variant/resolve", async (req, res) => {
   try {
     const dimension = normalizeDimension(req.body?.dimension || "");
     const thickness = normalizeThickness(req.body?.thickness || "");
-    const color = normalizeColor(req.body?.color || "");
+    const color     = normalizeColor(req.body?.color || "");
 
-    if (!dimension || !thickness || !color) {
-      return res.status(400).json({ error: "Dimension, épaisseur ou couleur manquante." });
-    }
+    if (!dimension || !thickness || !color) return res.status(400).json({ error: "Dimension, épaisseur ou couleur manquante." });
 
     const allowedThickness = ALLOWED_THICKNESS_BY_COLOR[color];
-    if (!allowedThickness) {
-      return res.status(404).json({ error: "Couleur introuvable." });
-    }
-
-    if (!allowedThickness.includes(thickness)) {
-      return res.status(400).json({
-        error: `L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`
-      });
-    }
+    if (!allowedThickness) return res.status(404).json({ error: "Couleur introuvable." });
+    if (!allowedThickness.includes(thickness)) return res.status(400).json({ error: `L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.` });
 
     const found = VARIANT_MAP?.[dimension]?.[thickness]?.[color];
-    if (!found) {
-      return res.status(404).json({ error: "Variant introuvable pour cette combinaison." });
-    }
+    if (!found) return res.status(404).json({ error: "Variant introuvable pour cette combinaison." });
 
     return res.json(found);
   } catch (error) {
@@ -1124,7 +907,7 @@ app.post("/api/variant/resolve", async (req, res) => {
 
 app.get("/api/gallery/categories", async (req, res) => {
   try {
-    const items = await getAllGalleryItemsForCategories();
+    const items      = await getAllGalleryItemsForCategories();
     const categories = getGalleryCategories(items);
     res.json({ categories });
   } catch (error) {
@@ -1136,30 +919,21 @@ app.get("/api/gallery/categories", async (req, res) => {
 app.get("/api/gallery", async (req, res) => {
   try {
     const requestedCategory = String(req.query.category || "tous").toLowerCase().trim();
-
-    const itemsRaw = await getGalleryItems({
-      category: requestedCategory,
-      limit: 60
-    });
-
-    const allForCategories = await getAllGalleryItemsForCategories();
+    const itemsRaw          = await getGalleryItems({ category: requestedCategory, limit: 60 });
+    const allForCategories  = await getAllGalleryItemsForCategories();
 
     const items = itemsRaw.map((item) => ({
-      id: item.id,
-      preview: item.image_url,
-      prompt: item.prompt,
-      category: item.category || "divers",
-      imageUrl: item.image_url,
+      id:         item.id,
+      preview:    item.image_url,
+      prompt:     item.prompt,
+      category:   item.category || "divers",
+      imageUrl:   item.image_url,
       shopifyUrl: item.shopify_url || null,
-      localUrl: item.local_url || null,
-      createdAt: item.created_at
+      localUrl:   item.local_url  || null,
+      createdAt:  item.created_at
     }));
 
-    res.json({
-      items,
-      categories: getGalleryCategories(allForCategories),
-      activeCategory: requestedCategory || "tous"
-    });
+    res.json({ items, categories: getGalleryCategories(allForCategories), activeCategory: requestedCategory || "tous" });
   } catch (e) {
     console.error("Erreur gallery :", e);
     res.status(500).json({ error: "gallery error" });
@@ -1168,25 +942,21 @@ app.get("/api/gallery", async (req, res) => {
 
 app.get("/api/gallery/random", async (req, res) => {
   try {
-    const randomItems = await getRandomGalleryItems(12);
+    const randomItems      = await getRandomGalleryItems(12);
     const allForCategories = await getAllGalleryItemsForCategories();
 
     const items = randomItems.map((item) => ({
-      id: item.id,
-      preview: item.image_url,
-      prompt: item.prompt,
-      category: item.category || "divers",
-      imageUrl: item.image_url,
+      id:         item.id,
+      preview:    item.image_url,
+      prompt:     item.prompt,
+      category:   item.category || "divers",
+      imageUrl:   item.image_url,
       shopifyUrl: item.shopify_url || null,
-      localUrl: item.local_url || null,
-      createdAt: item.created_at
+      localUrl:   item.local_url  || null,
+      createdAt:  item.created_at
     }));
 
-    res.json({
-      items,
-      categories: getGalleryCategories(allForCategories),
-      activeCategory: "tous"
-    });
+    res.json({ items, categories: getGalleryCategories(allForCategories), activeCategory: "tous" });
   } catch (e) {
     console.error("Erreur gallery random :", e);
     res.status(500).json({ error: "gallery error" });
@@ -1196,6 +966,7 @@ app.get("/api/gallery/random", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log("Fonts dir:", fontsDir);
+  console.log(`Production canvas fixe : ${PRODUCTION_WIDTH}x${PRODUCTION_HEIGHT}px (100x25mm)`);
   console.log("OPENAI_API_KEY présente :", !!process.env.OPENAI_API_KEY);
   console.log("SHOPIFY_STORE présent :", !!process.env.SHOPIFY_STORE);
   console.log("SHOPIFY_CLIENT_ID présent :", !!process.env.SHOPIFY_CLIENT_ID);
