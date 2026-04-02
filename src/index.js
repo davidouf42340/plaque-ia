@@ -412,7 +412,9 @@ app.post("/api/render/production-from-image", async (req, res) => {
     }).png().toBuffer();
 
     // Sauvegarde locale
-    const fileName = `${Date.now()}-production-${slugify(dimension)}-${slugify(color)}-${normalizeThickness(thickness)}-${Math.random().toString(36).slice(2,8)}.png`;
+    // Nommage : couleur-dimension-epaisseur-timestamp
+    const timestamp = new Date().toISOString().replace(/[-:T]/g,"").slice(0,14);
+    const fileName  = `${slugify(color)}-${slugify(dimension)}-${normalizeThickness(thickness)}mm-${timestamp}.png`;
     fs.writeFileSync(path.join(productionDir, fileName), productionBuffer);
     const localUrl = `${baseUrl}/generated/production/${fileName}`;
 
