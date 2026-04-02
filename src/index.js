@@ -343,7 +343,9 @@ app.post("/api/render/production-from-image", async (req, res) => {
       thickness    = "1.6",
       line1        = "",
       line2        = "",
-      line3        = ""
+      line3        = "",
+      flippedLeft  = false,
+      flippedRight = false
     } = req.body || {};
 
     if (!imageBase64) {
