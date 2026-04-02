@@ -268,6 +268,29 @@ async function uploadImageToShopify(buffer, filename, alt="") {
 app.get("/",       (req,res) => res.json({ ok:true, message:"Serveur configurateur plaque en ligne" }));
 app.get("/health", (req,res) => res.json({ ok:true }));
 app.get("/api/fonts", (req,res) => res.json({ fonts: fontFiles }));
+
+// ── Sert les fichiers TTF au navigateur client pour FontFace API ─────────────
+app.get("/fonts/:fontName", (req, res) => {
+  const name     = req.params.fontName;
+  const safeName = path.basename(name); // sécurité : pas de path traversal
+  const ttfPath  = path.join(fontsDir, safeName);
+  const otfPath  = path.join(fontsDir, safeName.replace(/\.ttf$/i, ".otf"));
+
+  if (fs.existsSync(ttfPath)) {
+    res.setHeader("Content-Type", "font/ttf");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.sendFile(ttfPath);
+  }
+  if (fs.existsSync(otfPath)) {
+    res.setHeader("Content-Type", "font/otf");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.sendFile(otfPath);
+  }
+  return res.status(404).json({ error: `Police introuvable : ${safeName}` });
+});
+// ─────────────────────────────────────────────────────────────────────────────
 app.get("/api/fonts/debug", (req,res) => {
   try { res.json({ fontsDir, files:fs.readdirSync(fontsDir), count:fs.readdirSync(fontsDir).length }); }
   catch(e) { res.json({ error:e.message, fontsDir }); }
