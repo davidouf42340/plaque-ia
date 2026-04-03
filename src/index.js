@@ -597,19 +597,12 @@ app.post("/api/realized/save", async (req, res) => {
     const localUrl   = `${baseUrl}/generated/production/${fileName}`;
 
     // Upload sur Shopify Files via URL publique Railway
+    // On utilise le même mécanisme que production-from-image (staged upload)
     let shopifyUrl = null;
     try {
-      const gqlResult = await shopifyGraphQL(
-        `mutation fileCreate($files:[FileCreateInput!]!){
-           fileCreate(files:$files){
-             files{__typename...on MediaImage{image{url}}}
-             userErrors{message}
-           }
-         }`,
-        { files: [{ filename: fileName, mimeType: "image/png", alt: "Réalisation plaque", contentType: "IMAGE", originalSource: localUrl }] }
-      );
-      shopifyUrl = gqlResult?.fileCreate?.files?.[0]?.image?.url || null;
-      if (!shopifyUrl) console.error("Shopify realized userErrors:", gqlResult?.fileCreate?.userErrors);
+      const result = await uploadImageToShopify(optimized, fileName, "Réalisation plaque");
+      shopifyUrl = result?.url || null;
+      console.log("Realized Shopify URL:", shopifyUrl);
     } catch(e) {
       console.error("Shopify upload realized:", e.message);
     }
