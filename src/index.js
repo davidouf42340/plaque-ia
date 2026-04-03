@@ -582,7 +582,7 @@ app.post("/api/realized/save", async (req, res) => {
   // Traitement asynchrone non bloquant
   (async () => {
     try {
-      const { imageBase64, color, dimension, thickness } = req.body || {};
+      const { imageBase64, color, dimension, thickness, leftLogoUrl, rightLogoUrl } = req.body || {};
       if (!imageBase64) return;
 
       // Decode + optimise
@@ -616,11 +616,13 @@ app.post("/api/realized/save", async (req, res) => {
       // Sauvegarde Supabase
       try {
         const { error } = await supabase.from("realized_plaques").insert({
-          image_url:  finalUrl,
-          color:      color     || null,
-          dimension:  dimension || null,
-          thickness:  thickness || null,
-          created_at: new Date().toISOString()
+          image_url:    finalUrl,
+          color:        color         || null,
+          dimension:    dimension     || null,
+          thickness:    thickness     || null,
+          left_logo_url:  leftLogoUrl  || null,
+          right_logo_url: rightLogoUrl || null,
+          created_at:   new Date().toISOString()
         });
         if (error) console.warn("Supabase realized insert:", error.message);
         else console.log("Realized saved to Supabase:", finalUrl);
@@ -641,7 +643,7 @@ app.get("/api/realized", async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const { data, error } = await supabase
       .from("realized_plaques")
-      .select("id, image_url, color, dimension, thickness, created_at")
+      .select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at")
       .order("created_at", { ascending: false })
       .limit(limit);
 
