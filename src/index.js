@@ -482,6 +482,73 @@ app.get("/api/gallery/random", async (req,res) => {
   } catch(e) { console.error(e); res.status(500).json({error:"gallery error"}); }
 });
 
+// ── /api/gallery/rate ─────────────────────────────────────────────────────
+// Enregistre une note (1-5 étoiles) anonyme dans Supabase
+// Table attendue : gallery_ratings (id, image_url, stars, created_at)
+// Note moyenne calculée côté serveur et renvoyée au client
+app.post("/api/gallery/rate", async (req, res) => {
+  try {
+    const { imageUrl, stars } = req.body || {};
+    if (!imageUrl || !stars || stars < 1 || stars > 5) {
+      return res.status(400).json({ error: "imageUrl et stars (1-5) requis" });
+    }
+
+    // Insère ou met à jour le vote (on stocke chaque vote, pas d'identifiant user)
+    const { error: insertError } = await supabase
+      .from("gallery_ratings")
+      .insert({ image_url: imageUrl, stars: Number(stars) });
+
+    if (insertError) {
+      console.error("Rate insert error:", insertError.message);
+      // Si la table n'existe pas encore, on renvoie quand même un résultat
+      return res.json({ avg: Number(stars), count: 1 });
+    }
+
+    // Calcule la moyenne pour cette image
+    const { data, error: avgError } = await supabase
+      .from("gallery_ratings")
+      .select("stars")
+      .eq("image_url", imageUrl);
+
+    if (avgError || !data || !data.length) {
+      return res.json({ avg: Number(stars), count: 1 });
+    }
+
+    const count = data.length;
+    const avg   = data.reduce((sum, r) => sum + r.stars, 0) / count;
+    res.json({ avg: Math.round(avg * 10) / 10, count });
+
+  } catch (e) {
+    console.error("Erreur /api/gallery/rate:", e.message);
+    res.status(500).json({ error: "rating error" });
+  }
+});
+
+// ── /api/gallery/increment-use ────────────────────────────────────────────
+// Incrémente le compteur d'utilisation quand une image est ajoutée au panier
+app.post("/api/gallery/increment-use", async (req, res) => {
+  try {
+    const { imageUrl } = req.body || {};
+    if (!imageUrl) return res.status(400).json({ error: "imageUrl requis" });
+
+    // Incrément via RPC Supabase ou update direct
+    const { error } = await supabase.rpc("increment_gallery_use", { p_image_url: imageUrl });
+    if (error) {
+      // Fallback : update manuel
+      const { error: upErr } = await supabase
+        .from("gallery_items")
+        .update({ use_count: supabase.raw("use_count + 1") })
+        .eq("image_url", imageUrl);
+      if (upErr) console.error("increment-use fallback error:", upErr.message);
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("Erreur /api/gallery/increment-use:", e.message);
+    res.status(500).json({ error: "increment error" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`${fontFiles.length} polices configurées`);
