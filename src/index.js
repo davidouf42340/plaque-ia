@@ -44,7 +44,7 @@ const fontFiles = [
   "Meaculpa","Merienda","Newrocker","Parisienne",
   "Passionone","Playbill","Pompiere","Rammettoone","Rancho",
   "Rye","Seves","Sylfaen",
-  "Thailand","Walto","Wendy"
+  "Walto","Wendy"
 ];
 
 for (const name of fontFiles) {
