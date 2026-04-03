@@ -584,6 +584,11 @@ app.post("/api/realized/save", async (req, res) => {
     try {
       const { imageBase64, color, dimension, thickness, leftLogoUrl, rightLogoUrl } = req.body || {};
       if (!imageBase64) return;
+      // Ne pas sauvegarder les plaques sans logo dans la galerie réalisations
+      if (!leftLogoUrl && !rightLogoUrl) {
+        console.log("Realized: pas de logo, on ne sauvegarde pas.");
+        return;
+      }
 
       // Decode + optimise
       const base64Data  = imageBase64.replace(/^data:image\/\w+;base64,/, "");
@@ -644,6 +649,7 @@ app.get("/api/realized", async (req, res) => {
     const { data, error } = await supabase
       .from("realized_plaques")
       .select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at")
+      .not("left_logo_url", "is", null)
       .order("created_at", { ascending: false })
       .limit(limit);
 
