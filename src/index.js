@@ -113,7 +113,7 @@ async function saveCreationBatch({ prompt, category, creations = [] }) {
   return data || [];
 }
 
-async function getGalleryItems({ category = "tous", limit = 60 } = {}) {
+async function getGalleryItems({ category = "tous", limit = 500 } = {}) {
   let q = supabase.from("gallery_items").select("*").eq("in_gallery",true).order("created_at",{ascending:false}).limit(limit);
   if (category && category !== "tous") q = q.eq("category", category);
   const { data, error } = await q;
@@ -466,7 +466,7 @@ app.get("/api/gallery/categories", async (req,res) => {
 app.get("/api/gallery", async (req,res) => {
   try {
     const cat = String(req.query.category||"tous").toLowerCase().trim();
-    const itemsRaw = await getGalleryItems({category:cat,limit:60});
+    const itemsRaw = await getGalleryItems({category:cat,limit:500});
     const allForCats = await getAllGalleryItemsForCategories();
     const items = itemsRaw.map(i=>({id:i.id,preview:i.image_url,prompt:i.prompt,category:i.category||"divers",imageUrl:i.image_url,shopifyUrl:i.shopify_url||null,localUrl:i.local_url||null,createdAt:i.created_at}));
     res.json({items,categories:getGalleryCategories(allForCats),activeCategory:cat||"tous"});
@@ -475,7 +475,7 @@ app.get("/api/gallery", async (req,res) => {
 
 app.get("/api/gallery/random", async (req,res) => {
   try {
-    const randomItems = await getRandomGalleryItems(12);
+    const randomItems = await getRandomGalleryItems(500);
     const allForCats  = await getAllGalleryItemsForCategories();
     const items = randomItems.map(i=>({id:i.id,preview:i.image_url,prompt:i.prompt,category:i.category||"divers",imageUrl:i.image_url,shopifyUrl:i.shopify_url||null,localUrl:i.local_url||null,createdAt:i.created_at}));
     res.json({items,categories:getGalleryCategories(allForCats),activeCategory:"tous"});
@@ -568,6 +568,95 @@ app.post("/api/gallery/recategorize", async (req, res) => {
     res.json({ ok: true, total: data.length, updated, message: `${updated} images recatégorisées sur ${data.length}` });
   } catch(e) {
     console.error("Erreur recategorize:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── /api/realized/save ────────────────────────────────────────────────────
+// Sauvegarde une réalisation client (image couleur base64 → Shopify CDN → Supabase)
+app.post("/api/realized/save", async (req, res) => {
+  try {
+    const { imageBase64, color, dimension, thickness } = req.body || {};
+    if (!imageBase64) return res.status(400).json({ error: "imageBase64 requis" });
+
+    // Decode base64
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const inputBuffer = Buffer.from(base64Data, "base64");
+
+    // Optimise avec sharp (resize pour la galerie)
+    const optimized = await sharp(inputBuffer)
+      .resize(1200, 300, { fit: "inside", withoutEnlargement: true })
+      .png({ compressionLevel: 8 })
+      .toBuffer();
+
+    // Upload sur Shopify Files
+    const timestamp = Date.now();
+    const fileName  = `realized-${color||"plaque"}-${dimension||""}-${timestamp}.png`;
+    let shopifyUrl  = null;
+
+    try {
+      const token = await getShopifyToken();
+      const shop   = process.env.SHOPIFY_STORE;
+      const b64Upload = optimized.toString("base64");
+
+      const mutation = `mutation fileCreate($files: [FileCreateInput!]!) {
+        fileCreate(files: $files) {
+          files { ... on MediaImage { image { url } } }
+          userErrors { message }
+        }
+      }`;
+      const variables = { files: [{ filename: fileName, mimeType: "image/png", alt: "Réalisation plaque", contentType: "IMAGE", originalSource: "data:image/png;base64," + b64Upload }] };
+
+      const r = await fetch(`https://${shop}/admin/api/${process.env.SHOPIFY_API_VERSION}/graphql.json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+        body: JSON.stringify({ query: mutation, variables })
+      });
+      const d = await r.json();
+      shopifyUrl = d?.data?.fileCreate?.files?.[0]?.image?.url || null;
+    } catch(e) {
+      console.error("Shopify upload realized:", e.message);
+    }
+
+    const finalUrl = shopifyUrl || null;
+    if (!finalUrl) return res.status(500).json({ error: "Upload Shopify échoué" });
+
+    // Sauvegarde en Supabase
+    const { data, error } = await supabase.from("realized_plaques").insert({
+      image_url: finalUrl,
+      color:     color     || null,
+      dimension: dimension || null,
+      thickness: thickness || null,
+      created_at: new Date().toISOString()
+    }).select().single();
+
+    if (error) {
+      console.error("Supabase realized insert:", error.message);
+      return res.json({ ok: true, url: finalUrl }); // on renvoie quand même l'URL
+    }
+
+    res.json({ ok: true, url: finalUrl, id: data?.id });
+  } catch(e) {
+    console.error("Erreur /api/realized/save:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── /api/realized ──────────────────────────────────────────────────────────
+// Retourne les réalisations pour la galerie publique
+app.get("/api/realized", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const { data, error } = await supabase
+      .from("realized_plaques")
+      .select("id, image_url, color, dimension, thickness, created_at")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ items: data || [] });
+  } catch(e) {
+    console.error("Erreur /api/realized:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
