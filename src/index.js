@@ -579,63 +579,56 @@ app.post("/api/realized/save", async (req, res) => {
     const { imageBase64, color, dimension, thickness } = req.body || {};
     if (!imageBase64) return res.status(400).json({ error: "imageBase64 requis" });
 
-    // Decode base64
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    // Decode base64 + optimise avec sharp
+    const base64Data  = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     const inputBuffer = Buffer.from(base64Data, "base64");
-
-    // Optimise avec sharp (resize pour la galerie)
-    const optimized = await sharp(inputBuffer)
+    const optimized   = await sharp(inputBuffer)
       .resize(1200, 300, { fit: "inside", withoutEnlargement: true })
       .png({ compressionLevel: 8 })
       .toBuffer();
 
-    // Upload sur Shopify Files
+    // Sauvegarde temporaire sur Railway pour obtenir une URL publique
     const timestamp = Date.now();
     const fileName  = `realized-${color||"plaque"}-${dimension||""}-${timestamp}.png`;
-    let shopifyUrl  = null;
+    const localPath = path.join(productionDir, fileName);
+    fs.writeFileSync(localPath, optimized);
 
+    const baseUrl    = process.env.PUBLIC_BASE_URL || "https://simulateur-pag.up.railway.app";
+    const localUrl   = `${baseUrl}/generated/production/${fileName}`;
+
+    // Upload sur Shopify Files via URL publique Railway
+    let shopifyUrl = null;
     try {
-      const token = await getShopifyToken();
-      const shop   = process.env.SHOPIFY_STORE;
-      const b64Upload = optimized.toString("base64");
-
-      const mutation = `mutation fileCreate($files: [FileCreateInput!]!) {
-        fileCreate(files: $files) {
-          files { ... on MediaImage { image { url } } }
-          userErrors { message }
-        }
-      }`;
-      const variables = { files: [{ filename: fileName, mimeType: "image/png", alt: "Réalisation plaque", contentType: "IMAGE", originalSource: "data:image/png;base64," + b64Upload }] };
-
-      const r = await fetch(`https://${shop}/admin/api/${process.env.SHOPIFY_API_VERSION}/graphql.json`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
-        body: JSON.stringify({ query: mutation, variables })
-      });
-      const d = await r.json();
-      shopifyUrl = d?.data?.fileCreate?.files?.[0]?.image?.url || null;
+      const gqlResult = await shopifyGraphQL(
+        `mutation fileCreate($files:[FileCreateInput!]!){
+           fileCreate(files:$files){
+             files{__typename...on MediaImage{image{url}}}
+             userErrors{message}
+           }
+         }`,
+        { files: [{ filename: fileName, mimeType: "image/png", alt: "Réalisation plaque", contentType: "IMAGE", originalSource: localUrl }] }
+      );
+      shopifyUrl = gqlResult?.fileCreate?.files?.[0]?.image?.url || null;
+      if (!shopifyUrl) console.error("Shopify realized userErrors:", gqlResult?.fileCreate?.userErrors);
     } catch(e) {
       console.error("Shopify upload realized:", e.message);
     }
 
-    const finalUrl = shopifyUrl || null;
-    if (!finalUrl) return res.status(500).json({ error: "Upload Shopify échoué" });
+    // URL finale : Shopify CDN si dispo, sinon Railway
+    const finalUrl = shopifyUrl || localUrl;
 
     // Sauvegarde en Supabase
     const { data, error } = await supabase.from("realized_plaques").insert({
-      image_url: finalUrl,
-      color:     color     || null,
-      dimension: dimension || null,
-      thickness: thickness || null,
+      image_url:  finalUrl,
+      color:      color     || null,
+      dimension:  dimension || null,
+      thickness:  thickness || null,
       created_at: new Date().toISOString()
     }).select().single();
 
-    if (error) {
-      console.error("Supabase realized insert:", error.message);
-      return res.json({ ok: true, url: finalUrl }); // on renvoie quand même l'URL
-    }
+    if (error) console.error("Supabase realized insert:", error.message);
 
-    res.json({ ok: true, url: finalUrl, id: data?.id });
+    res.json({ ok: true, url: finalUrl, id: data?.id || null });
   } catch(e) {
     console.error("Erreur /api/realized/save:", e.message);
     res.status(500).json({ error: e.message });
