@@ -163,14 +163,14 @@ const VARIANT_MAP = {
 };
 
 const CATEGORY_RULES = [
-  { key:"animaux",      words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou"] },
-  { key:"sport",        words:["football","foot","basket","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon"] },
-  { key:"medical",      words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","croix pharmacie","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine"] },
-  { key:"beaute",       words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon"] },
-  { key:"restauration", words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse"] },
-  { key:"batiment",     words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux"] },
-  { key:"nature",       words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere"] },
-  { key:"symboles",     words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason"] }
+  { key:"animaux",      words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou","cochon","vache","mouton","loup","renard","cerf","dauphin","baleine","crabe","homard","singe","gorille","girafe","zèbre","zebre","rhinocéros","rhinoceros","hippopotame","crocodile","alligator","grenouille","lizard","lézard","ara","perroquet","flamant","pingouin","manchot","ours","panda","koala","kangourou","loutre","castor","écureuil","ecureuil","hérisson","herisson","armadillo","chauve-souris","chauve souris","mante","abeille","papillon","libellule","araignée","araignee","scorpion","tortue","cameleon","caméléon"] },
+  { key:"sport",        words:["football","foot","basket","basketball","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon","ski","snowboard","surf","skateboard","roller","escalade","tir à l'arc","escrime","équitation","equitation","gym","gymnaste","handball","volleyball","volley","badminton","ping pong","bowling","billard","fléchettes","flechettes","poids","barbell","dumbbell","tapis","yoga","pilates","danse","athletisme","atletisme","sprint","saut","javelot","disque","perche","lutte","mma","taekwondo","aïkido","aikido","kung fu","capoeira"] },
+  { key:"medical",      words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","croix pharmacie","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine","pilule","médicament","medicament","ambulance","urgence","scalpel","bistouri","pince","compresse","bandage","plâtre","platre","fauteuil roulant","béquille","bequille","opticien","lunettes","otite","cardiologie","coeur","anatomie","squelette","os","dent","thermomètre","thermometre","tension","pression","sang","analyses","laboratoire","labo","radio","scanner","irm","psychologue","psy","cabinet","clinique"] },
+  { key:"beaute",       words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon","peigne","sèche-cheveux","seche cheveux","fer à lisser","fer a lisser","boucleur","rasoir","mousse","gel","vernis","rouge à lèvres","rouge a levres","fond de teint","mascara","eye-liner","eyeliner","sourcils","cils","épilation","epilation","manucure","pédicure","pedicure","beauty","lash","nail","tatouage","piercing","dermatologue","crème","creme","lotion","parfum","eau de toilette"] },
+  { key:"restauration", words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse","assiette","verre","bouteille","bière","biere","champagne","whisky","sushi","pâtes","pates","salade","soupe","gâteau","gateau","dessert","chocolat","glace","confiserie","épicerie","epicerie","marché","marche","traiteur","snack","kebab","tacos","crêpe","crepe","gaufre","waffle","barbecue","bbq","steakhouse","rôtisserie","rotisserie","poissonnerie","boucherie","charcuterie","fromagerie","bar","brasserie","taverne","auberge","hôtel","hotel","fast food","fast-food","drive"] },
+  { key:"batiment",     words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux","peintre","peinture","menuisier","menuiserie","charpente","charpentier","couvreur","toiture","carreleur","carrelage","vitrier","vitrerie","serrurier","serrure","chauffagiste","climatisation","clim","isolation","insulation","façade","facade","terrassier","terrassement","génie civil","genie civil","ingénieur","ingenieur","architecte","architecture","grues","grue","bulldozer","pelleteuse","niveau","équerre","equerre","mètre","metre","règle","regle","cordeau","brouette","ciment","béton","beton","brique","parpaing","acier","ferrailleur","soudeur","soudure","démolition","demolition","rénovation","renovation","agrandissement","extension","villa","immeuble","appartement","chantier","plan","blueprint"] },
+  { key:"nature",       words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere","ocean","mer","vague","plage","sable","désert","desert","savane","jungle","tropique","palmier","bambou","cactus","herbe","prairie","colline","vallée","vallee","volcan","glacier","cascade","lac","étang","etang","marais","tourbière","tourbi","champignon","mousse","lichen","pin","chêne","chene","bouleau","sapin","cerisier","lavande","tournesol","coquelicot","marguerite","tulipe","orchidée","orchidee","lotus","nénuphar","nenuphar","algue","corail","mangrove","terrier","nid","ruche","toile araignée","toile araignee","météore","meteor","arc-en-ciel","aurore","brouillard","rosée","rosee","givre","neige","glace","vent","tempête","tempete"] },
+  { key:"symboles",     words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason","bouclier","épée","epee","bouclier","ancre","boussole","globe","monde","paix","infini","yin yang","étoile de david","croissant","om","trèfle","trefle","fer à cheval","fer a cheval","dreamcatcher","mandala","caducée","caducee","balance","justice","phare","clef","clé","cle","cadenas","cadre","ruban","nœud","noeud","aile","plume","main","poing","pouce","œil","oeil","pyramide","triangle","hexagone","octogone","cercle","spiral","galaxie","cosmos","atome","molécule","molecule","dna","adn","code","circuit","robot","intelligence artificielle","ia","wifi","bluetooth","numérique","numerique"] }
 ];
 
 function detectCategory(prompt = "") {
@@ -546,6 +546,29 @@ app.post("/api/gallery/increment-use", async (req, res) => {
   } catch (e) {
     console.error("Erreur /api/gallery/increment-use:", e.message);
     res.status(500).json({ error: "increment error" });
+  }
+});
+
+// ── /api/gallery/recategorize ─────────────────────────────────────────────
+// Recatégorise TOUTES les images en base selon les mots-clés actuels
+// Appel unique depuis le dashboard admin
+app.post("/api/gallery/recategorize", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("gallery_items").select("id,prompt,category").eq("in_gallery", true);
+    if (error) return res.status(500).json({ error: error.message });
+
+    let updated = 0;
+    for (const item of data) {
+      const newCat = detectCategory(item.prompt || "");
+      if (newCat !== item.category) {
+        await supabase.from("gallery_items").update({ category: newCat }).eq("id", item.id);
+        updated++;
+      }
+    }
+    res.json({ ok: true, total: data.length, updated, message: `${updated} images recatégorisées sur ${data.length}` });
+  } catch(e) {
+    console.error("Erreur recategorize:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
