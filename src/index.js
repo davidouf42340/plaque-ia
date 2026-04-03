@@ -36,15 +36,15 @@ app.use("/generated", express.static(generatedDir));
 
 // ─── Enregistrement des polices ──────────────────────────────────────────────
 const fontFiles = [
-  "Allura-regular","Amandine","Arlrdbd","Baskvill","Bernhc","Calinastiya-demo",
-  "Caribbean","Chewy-regular","Chonburi-regular","Coopbl","Dancingscript-regular",
-  "Dmserifdisplay-regular","Ea-sports-covers-sc-1-5","Electrolize-regular",
-  "Exotc350-bd-bt-bold","Fishermills","Galada-regular","Greatvibes-regular","Hujan",
-  "Juliussansone-regular","Justmeagaindownhere","Luxes","Manuscript","Marckscript-regular",
-  "Meaculpa-regular","Merienda-regular","Newrocker-regular","Parisienne-regular",
-  "Passionone-regular","Playbill","Pompiere-regular","Rammettoone-regular","Rancho-regular",
-  "Rye-regular","Sevesbrg","Stardosstencil-bold","Stardosstencil-regular","Sylfaen",
-  "Thailand","Viking-n","Waltographui","Wendyone-regular"
+  "Allura","Amandine","Arlrdbd","Baskvill","Bernhc","Calinastiya",
+  "Caribbean","Chewy","Chonburi","Coopbl","Dancingscript",
+  "Dmserifdisplay","Sport","Electrolize",
+  "Exotic","Fishermills","Galada","Greatvibes","Hujan",
+  "Julius","Justme","Luxes","Manuscript","Marckscript",
+  "Meaculpa","Merienda","Newrocker","Parisienne",
+  "Passionone","Playbill","Pompiere","Rammettoone","Rancho",
+  "Rye","Seves","Sylfaen",
+  "Thailand","Walto","Wendy"
 ];
 
 for (const name of fontFiles) {
