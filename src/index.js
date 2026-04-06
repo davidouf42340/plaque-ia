@@ -576,69 +576,59 @@ app.post("/api/gallery/recategorize", async (req, res) => {
 // Sauvegarde une réalisation client — NON BLOQUANT : répond toujours 200
 // même si Shopify ou Supabase échoue, pour ne jamais crasher le serveur
 app.post("/api/realized/save", async (req, res) => {
-  // Répond immédiatement au client — l'upload se fait en arrière-plan
-  res.json({ ok: true });
+  // Traitement synchrone pour retourner l'URL à l'appelant
+  try {
+    const { imageBase64, color, dimension, thickness, leftLogoUrl, rightLogoUrl } = req.body || {};
+    if (!imageBase64) return res.json({ ok: true });
 
-  // Traitement asynchrone non bloquant
-  (async () => {
+    // Upload image colorée sur Shopify pour miniature panier
+    const base64Data  = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const inputBuffer = Buffer.from(base64Data, "base64");
+    const optimized   = await sharp(inputBuffer)
+      .resize(1200, 300, { fit: "inside", withoutEnlargement: true })
+      .png({ compressionLevel: 8 })
+      .toBuffer();
+
+    const timestamp = Date.now();
+    const fileName  = `realized-${(color||"plaque").replace(/[^a-z0-9-]/gi,"")}-${timestamp}.png`;
+    const localPath = path.join(productionDir, fileName);
+    fs.writeFileSync(localPath, optimized);
+    const baseUrl  = process.env.PUBLIC_BASE_URL || "https://simulateur-pag.up.railway.app";
+    const localUrl = `${baseUrl}/generated/production/${fileName}`;
+
+    let finalUrl = localUrl;
     try {
-      const { imageBase64, color, dimension, thickness, leftLogoUrl, rightLogoUrl } = req.body || {};
-      if (!imageBase64) return;
-      // Ne pas sauvegarder les plaques sans logo dans la galerie réalisations
-      if (!leftLogoUrl && !rightLogoUrl) {
-        console.log("Realized: pas de logo, on ne sauvegarde pas.");
-        return;
-      }
-
-      // Decode + optimise
-      const base64Data  = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-      const inputBuffer = Buffer.from(base64Data, "base64");
-      const optimized   = await sharp(inputBuffer)
-        .resize(1200, 300, { fit: "inside", withoutEnlargement: true })
-        .png({ compressionLevel: 8 })
-        .toBuffer();
-
-      // Sauvegarde locale Railway (fallback)
-      const timestamp = Date.now();
-      const fileName  = `realized-${(color||"plaque").replace(/[^a-z0-9-]/gi,"")}-${timestamp}.png`;
-      const localPath = path.join(productionDir, fileName);
-      fs.writeFileSync(localPath, optimized);
-      const baseUrl  = process.env.PUBLIC_BASE_URL || "https://simulateur-pag.up.railway.app";
-      const localUrl = `${baseUrl}/generated/production/${fileName}`;
-
-      // Tente upload Shopify
-      let finalUrl = localUrl;
-      try {
-        const result = await uploadImageToShopify(optimized, fileName, "Réalisation plaque");
-        if (result?.url) {
-          finalUrl = result.url;
-          console.log("Realized saved to Shopify:", finalUrl);
-        }
-      } catch(e) {
-        console.warn("Realized Shopify upload failed (using local):", e.message);
-      }
-
-      // Sauvegarde Supabase
-      try {
-        const { error } = await supabase.from("realized_plaques").insert({
-          image_url:    finalUrl,
-          color:        color         || null,
-          dimension:    dimension     || null,
-          thickness:    thickness     || null,
-          left_logo_url:  leftLogoUrl  || null,
-          right_logo_url: rightLogoUrl || null,
-          created_at:   new Date().toISOString()
-        });
-        if (error) console.warn("Supabase realized insert:", error.message);
-        else console.log("Realized saved to Supabase:", finalUrl);
-      } catch(e) {
-        console.warn("Supabase realized error:", e.message);
-      }
-
+      const result = await uploadImageToShopify(optimized, fileName, "Réalisation plaque");
+      if (result?.url) finalUrl = result.url;
     } catch(e) {
-      console.error("Realized background save error:", e.message);
+      console.warn("Realized Shopify upload failed:", e.message);
     }
-  })();
+
+    // Retourne l'URL immédiatement
+    res.json({ ok: true, url: finalUrl });
+
+    // Sauvegarde Supabase en arrière-plan si logo présent
+    if (leftLogoUrl || rightLogoUrl) {
+      (async () => {
+        try {
+          await supabase.from("realized_plaques").insert({
+            image_url:     finalUrl,
+            color:         color      || null,
+            dimension:     dimension  || null,
+            thickness:     thickness  || null,
+            left_logo_url:  leftLogoUrl  || null,
+            right_logo_url: rightLogoUrl || null,
+            created_at:    new Date().toISOString()
+          });
+        } catch(e) { console.warn("Supabase realized error:", e.message); }
+      })();
+    }
+
+  } catch(e) {
+    console.error("Realized save error:", e.message);
+    res.json({ ok: false });
+  }
+
 });
 
 // ── /api/realized ──────────────────────────────────────────────────────────
