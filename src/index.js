@@ -631,6 +631,20 @@ app.post("/api/realized/save", async (req, res) => {
 
 });
 
+// ── /api/realized/delete ──────────────────────────────────────────────────
+app.post("/api/realized/delete", async (req, res) => {
+  try {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ error: "id requis" });
+    const { error } = await supabase.from("realized_plaques").delete().eq("id", id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch(e) {
+    console.error("Delete realized error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── /api/realized ──────────────────────────────────────────────────────────
 // Retourne les réalisations pour la galerie publique
 app.get("/api/realized", async (req, res) => {
