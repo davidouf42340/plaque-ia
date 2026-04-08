@@ -631,6 +631,23 @@ app.post("/api/realized/save", async (req, res) => {
 
 });
 
+// ── /api/upload-base64 ────────────────────────────────────────────────────
+// Upload une image base64 directement sur Shopify sans traitement
+app.post("/api/upload-base64", async (req, res) => {
+  try {
+    const { imageBase64, filename } = req.body || {};
+    if (!imageBase64) return res.status(400).json({ error: "imageBase64 requis" });
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(base64Data, "base64");
+    const fname = filename || `preview-${Date.now()}.png`;
+    const result = await uploadImageToShopify(buffer, fname, "Aperçu plaque");
+    res.json({ ok: true, url: result.url });
+  } catch(e) {
+    console.error("Erreur /api/upload-base64:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── /api/logo/process ─────────────────────────────────────────────────────
 // Traite un logo uploadé par le client :
 // 1. Analyse si fond transparent + N&B → direct
