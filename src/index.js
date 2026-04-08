@@ -727,9 +727,9 @@ app.post("/api/logo/process", async (req, res) => {
 
     // Upload sur Shopify CDN
     const filename = `client-logo-${Date.now()}.png`;
-    const shopifyUrl = await uploadToShopify(outputBuffer, filename, "image/png");
+    const result = await uploadImageToShopify(outputBuffer, filename, "Logo client");
 
-    res.json({ ok: true, url: shopifyUrl, method });
+    res.json({ ok: true, url: result.url, method });
   } catch(e) {
     console.error("Erreur /api/logo/process:", e.message);
     res.status(500).json({ error: e.message });
