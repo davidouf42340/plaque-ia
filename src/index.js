@@ -445,47 +445,10 @@ app.post("/api/render/production-from-image", async (req, res) => {
 });
 // ─────────────────────────────────────────────────────────────────────────────
 
-const RUE_VARIANT_MAP = {
-  "150x100mm": {
-    "1.6mm - À coller": {"acier-brosse":{variantId:53672841478471},"or":{variantId:53672841511239},"cuivre":{variantId:53672841544007},"blanc":{variantId:53672841576775},"noir":{variantId:53672841609543},"gris":{variantId:53672841642311},"noyer":{variantId:53672841675079},"rose":{variantId:53672841707847}},
-    "1.6mm - À fixer":  {"acier-brosse":{variantId:53672841740615},"or":{variantId:53672841773383},"cuivre":{variantId:53672841806151},"blanc":{variantId:53672841838919},"noir":{variantId:53672841871687}},
-    "3.2mm - À coller": {"acier-brosse":{variantId:53672841904455},"or":{variantId:53672841937223},"cuivre":{variantId:53672841969991},"blanc":{variantId:53672842002759},"noir":{variantId:53672842035527}},
-    "3.2mm - À fixer":  {"acier-brosse":{variantId:53672842068295},"or":{variantId:53672842101063},"cuivre":{variantId:53672842133831},"blanc":{variantId:53672842166599},"noir":{variantId:53672842199367}}
-  },
-  "200x133mm": {
-    "1.6mm - À coller": {"acier-brosse":{variantId:53672935194951},"or":{variantId:53672935227719},"cuivre":{variantId:53672935260487},"blanc":{variantId:53672935293255},"noir":{variantId:53672935326023},"gris":{variantId:53672935358791},"noyer":{variantId:53672935391559},"rose":{variantId:53672935424327}},
-    "3.2mm - À coller": {"acier-brosse":{variantId:53672935457095},"or":{variantId:53672935489863},"cuivre":{variantId:53672935522631},"blanc":{variantId:53672935555399},"noir":{variantId:53672935588167}},
-    "3.2mm - À fixer":  {"acier-brosse":{variantId:53672935620935},"or":{variantId:53672935653703},"cuivre":{variantId:53672935686471},"blanc":{variantId:53672935719239},"noir":{variantId:53672935752007}}
-  },
-  "250x167mm": {
-    "1.6mm - À coller": {"acier-brosse":{variantId:53672935784775},"or":{variantId:53672935817543},"cuivre":{variantId:53672935850311},"blanc":{variantId:53672935883079},"noir":{variantId:53672935915847},"gris":{variantId:53672935948615},"noyer":{variantId:53672935981383},"rose":{variantId:53672936014151}},
-    "3.2mm - À coller": {"acier-brosse":{variantId:53672936046919},"or":{variantId:53672936079687},"cuivre":{variantId:53672936112455},"blanc":{variantId:53672936145223},"noir":{variantId:53672936177991}},
-    "3.2mm - À fixer":  {"acier-brosse":{variantId:53672936210759},"or":{variantId:53672936243527},"cuivre":{variantId:53672936276295},"blanc":{variantId:53672936309063},"noir":{variantId:53672936341831}}
-  },
-  "300x200mm": {
-    "1.6mm - À coller": {"acier-brosse":{variantId:53672936374599},"or":{variantId:53672936407367},"cuivre":{variantId:53672936440135},"blanc":{variantId:53672936472903},"noir":{variantId:53672936505671},"gris":{variantId:53672936538439},"noyer":{variantId:53672936571207},"rose":{variantId:53672936603975}},
-    "3.2mm - À coller": {"acier-brosse":{variantId:53672936636743},"or":{variantId:53672936669511},"cuivre":{variantId:53672936702279},"blanc":{variantId:53672936735047},"noir":{variantId:53672936767815}},
-    "3.2mm - À fixer":  {"acier-brosse":{variantId:53672936800583},"or":{variantId:53672936833351},"cuivre":{variantId:53672936866119},"blanc":{variantId:53672936898887},"noir":{variantId:53672936931655}}
-  }
-};
-
 app.post("/api/variant/resolve", async (req,res) => {
   try {
     const dimension=normalizeDimension(req.body?.dimension||""), thickness=normalizeThickness(req.body?.thickness||""), color=normalizeColor(req.body?.color||"");
-    const fixation = req.body?.fixation || null;
-    const productHandle = req.body?.productHandle || null;
-
     if (!dimension||!thickness||!color) return res.status(400).json({error:"Dimension, épaisseur ou couleur manquante."});
-
-    // Plaque de rue — RUE_VARIANT_MAP
-    if (productHandle && productHandle.includes("rue")) {
-      const epFix = thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
-      const found = RUE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
-      if (found) return res.json(found);
-      return res.status(404).json({error:`Variant rue introuvable: ${dimension} / ${epFix} / ${color}`});
-    }
-
-    // Plaque BAL — VARIANT_MAP
     const allowed = ALLOWED_THICKNESS_BY_COLOR[color];
     if (!allowed) return res.status(404).json({error:"Couleur introuvable."});
     if (!allowed.includes(thickness)) return res.status(400).json({error:`L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`});
