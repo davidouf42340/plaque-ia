@@ -296,215 +296,41 @@ app.get("/api/fonts/debug", (req,res) => {
   catch(e) { res.json({ error:e.message, fontsDir }); }
 });
 
-app.post("/api/logos/search-or-generate", async (req, res) => {
+app.post("/api/logos/search-or-generate", async (req,res) => {
   try {
-    const { prompt, count = 3 } = req.body || {};
-
-    const cleanPrompt = String(prompt || "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const imageCount = Math.max(1, Math.min(Number(count) || 3, 3));
-
-    // ── VALIDATIONS PROMPT ─────────────────────────────────────────────
-    if (!cleanPrompt) {
-      return res.status(400).json({
-        code: "MISSING_PROMPT",
-        error: "Prompt image manquant."
-      });
-    }
-
-    if (cleanPrompt.length < 3) {
-      return res.status(400).json({
-        code: "PROMPT_TOO_SHORT",
-        error: "Votre description est trop courte. Décrivez un peu plus précisément l’image souhaitée."
-      });
-    }
-
-    if (cleanPrompt.length > 180) {
-      return res.status(400).json({
-        code: "PROMPT_TOO_LONG",
-        error: "Votre description est trop longue. Merci de la raccourcir."
-      });
-    }
-
-    const tooBasicPrompts = [
-      "logo",
-      "animal",
-      "chien",
-      "chat",
-      "sport",
-      "medical",
-      "beaute",
-      "restaurant",
-      "nature",
-      "symbole",
-      "icône",
-      "icone",
-      "dessin",
-      "image",
-      "pictogramme",
-      "simple",
-      "beau"
-    ];
-
-    const normalizedPrompt = cleanPrompt
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-
-    if (tooBasicPrompts.includes(normalizedPrompt)) {
-      return res.status(400).json({
-        code: "PROMPT_TOO_BASIC",
-        error: "Votre description est trop vague. Ajoutez plus de détails, par exemple le style, la position ou un élément distinctif."
-      });
-    }
-
-    const wordCount = normalizedPrompt.split(/\s+/).filter(Boolean).length;
-    if (wordCount === 1 && normalizedPrompt.length < 8) {
-      return res.status(400).json({
-        code: "PROMPT_TOO_BASIC",
-        error: "Votre description est trop vague. Merci d’ajouter au moins un détail visuel."
-      });
-    }
-
-    const baseUrl = getBaseUrl(req);
+    const { prompt, count=3 } = req.body||{};
+    const cleanPrompt = String(prompt||"").trim();
+    const imageCount  = Math.max(1,Math.min(Number(count)||3,3));
+    if (!cleanPrompt) return res.status(400).json({ code:"MISSING_PROMPT", error:"Prompt image manquant." });
+    const baseUrl     = getBaseUrl(req);
+    const finalPrompt = ["Créer un pictogramme noir pour gravure laser.","Fond totalement transparent.","Visuel simple, propre, centré, lisible, sans décor, sans ombre, sans fond.","Style pictogramme professionnel, lignes franches, peu de détails fins.","Ne pas ajouter de texte ni de cadre.",`Sujet: ${cleanPrompt}`].join(" ");
+    const result   = await openai.images.generate({ model:"gpt-image-1", prompt:finalPrompt, size:"1024x1024", background:"transparent", output_format:"png", quality:"medium", n:imageCount });
+    const logos=[], creationsToSave=[];
     const category = detectCategory(cleanPrompt);
-    const styleHint = getCategoryStyle(category);
-
-    // ── PROMPT IA AMÉLIORÉ ─────────────────────────────────────────────
-    const finalPrompt = [
-      "Créer un logo noir premium pour gravure laser.",
-      "Fond totalement transparent.",
-      "Visuel centré, lisible, élégant et professionnel.",
-      styleHint,
-      "Le résultat doit être plus travaillé qu’un pictogramme basique.",
-      "Style semi-réaliste stylisé, haut de gamme, propre et équilibré.",
-      "Conserver une silhouette forte, reconnaissable et esthétique.",
-      "Ajouter du caractère visuel et une composition plus aboutie, tout en restant exploitable pour une gravure laser monochrome.",
-      "Noir uniquement, sans couleur.",
-      "Pas de texte, pas de cadre, pas de fond, pas de décor extérieur.",
-      "Éviter les détails trop microscopiques ou impossibles à graver.",
-      "Contours nets, lisibilité immédiate, rendu premium.",
-      `Sujet: ${cleanPrompt}`
-    ].join(" ");
-
-    const result = await openai.images.generate({
-      model: "gpt-image-1",
-      prompt: finalPrompt,
-      size: "1024x1024",
-      background: "transparent",
-      output_format: "png",
-      quality: "medium",
-      n: imageCount
-    });
-
-    const logos = [];
-    const creationsToSave = [];
-
-    for (let i = 0; i < (result.data || []).length; i += 1) {
+    for (let i=0;i<(result.data||[]).length;i++) {
       const item = result.data[i];
       if (!item.b64_json) continue;
-
-      const fileBase = `${Date.now()}-${slugify(cleanPrompt)}-${i + 1}`;
-      const fileName = `${fileBase}.png`;
-      const filePath = path.join(logosDir, fileName);
-      const buffer = Buffer.from(item.b64_json, "base64");
-
-      fs.writeFileSync(filePath, buffer);
-
-      let shopifyUrl = null;
-      let shopifyFileId = null;
-
-      try {
-        const uploaded = await uploadImageToShopify(
-          buffer,
-          fileName,
-          `Logo IA: ${cleanPrompt}`
-        );
-        shopifyUrl = uploaded.url;
-        shopifyFileId = uploaded.id;
-      } catch (e) {
-        console.error("Shopify upload failed:", e.message);
-      }
-
-      const localUrl = `${baseUrl}/generated/logos/${fileName}`;
-      const finalUrl = shopifyUrl || localUrl;
-
-      creationsToSave.push({
-        fileBase,
-        imageUrl: finalUrl,
-        localUrl,
-        shopifyUrl,
-        shopifyFileId
-      });
-
-      logos.push({
-        id: fileBase,
-        url: finalUrl,
-        localUrl,
-        shopifyUrl,
-        shopifyFileId,
-        category
-      });
+      const fileBase=`${Date.now()}-${slugify(cleanPrompt)}-${i+1}`, fileName=`${fileBase}.png`;
+      const buffer = Buffer.from(item.b64_json,"base64");
+      fs.writeFileSync(path.join(logosDir,fileName), buffer);
+      let shopifyUrl=null, shopifyFileId=null;
+      try { const u=await uploadImageToShopify(buffer,fileName,`Logo IA: ${cleanPrompt}`); shopifyUrl=u.url; shopifyFileId=u.id; } catch(e) { console.error("Shopify upload failed:",e.message); }
+      const localUrl=`${baseUrl}/generated/logos/${fileName}`, finalUrl=shopifyUrl||localUrl;
+      creationsToSave.push({fileBase,imageUrl:finalUrl,localUrl,shopifyUrl,shopifyFileId});
+      logos.push({id:fileBase,url:finalUrl,localUrl,shopifyUrl,shopifyFileId,category});
     }
-
-    if (creationsToSave.length) {
-      await saveCreationBatch({
-        prompt: cleanPrompt,
-        category,
-        creations: creationsToSave
-      });
-    }
-
+    if (creationsToSave.length) await saveCreationBatch({prompt:cleanPrompt,category,creations:creationsToSave});
     return res.json({ logos });
-
-  } catch (error) {
-    console.error("Erreur /api/logos/search-or-generate :", error);
-
-    const rawMessage = String(error?.message || "").toLowerCase();
-    const status = Number(error?.status || 500);
-
-    if (
-      status === 429 ||
-      rawMessage.includes("rate limit") ||
-      rawMessage.includes("too many requests")
-    ) {
-      return res.status(429).json({
-        code: "RATE_LIMIT",
-        error: "La génération d’images est momentanément très sollicitée. Merci de réessayer dans quelques secondes."
-      });
-    }
-
-    if (
-      rawMessage.includes("quota") ||
-      rawMessage.includes("billing") ||
-      rawMessage.includes("insufficient") ||
-      rawMessage.includes("credit")
-    ) {
-      return res.status(503).json({
-        code: "BILLING_UNAVAILABLE",
-        error: "Le service de génération d’images est momentanément indisponible."
-      });
-    }
-
-    if (
-      rawMessage.includes("api key") ||
-      rawMessage.includes("unauthorized") ||
-      status === 401
-    ) {
-      return res.status(503).json({
-        code: "AUTH_ERROR",
-        error: "Le service de génération d’images est momentanément indisponible."
-      });
-    }
-
-    return res.status(500).json({
-      code: "GENERIC_GENERATION_ERROR",
-      error: "Une erreur est survenue lors de la génération des images. Merci de réessayer."
-    });
+  } catch(error) {
+    console.error("Erreur /api/logos/search-or-generate :",error);
+    const raw=String(error?.message||"").toLowerCase(), status=Number(error?.status||500);
+    if (status===429||raw.includes("rate limit")||raw.includes("too many")) return res.status(429).json({code:"RATE_LIMIT",error:"La génération est momentanément très sollicitée. Merci de réessayer dans quelques secondes."});
+    if (raw.includes("quota")||raw.includes("billing")||raw.includes("insufficient")||raw.includes("credit")) return res.status(503).json({code:"BILLING_UNAVAILABLE",error:"Le service de génération est momentanément indisponible."});
+    if (raw.includes("api key")||raw.includes("unauthorized")||status===401) return res.status(503).json({code:"AUTH_ERROR",error:"Le service de génération est momentanément indisponible."});
+    return res.status(500).json({code:"GENERIC_GENERATION_ERROR",error:"Une erreur est survenue. Merci de réessayer."});
   }
 });
+
 // ─── /api/render/production-from-image ───────────────────────────────────────
 // Reçoit le PNG base64 capturé par html2canvas.
 // Supprime le fond clair → transparent, met les éléments en noir #111111.
