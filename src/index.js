@@ -303,7 +303,16 @@ app.post("/api/logos/search-or-generate", async (req,res) => {
     const imageCount  = Math.max(1,Math.min(Number(count)||3,3));
     if (!cleanPrompt) return res.status(400).json({ code:"MISSING_PROMPT", error:"Prompt image manquant." });
     const baseUrl     = getBaseUrl(req);
-    const finalPrompt = ["Créer un pictogramme noir pour gravure laser.","Fond totalement transparent.","Visuel simple, propre, centré, lisible, sans décor, sans ombre, sans fond.","Style pictogramme professionnel, lignes franches, peu de détails fins.","Ne pas ajouter de texte ni de cadre.",`Sujet: ${cleanPrompt}`].join(" ");
+  const finalPrompt = [
+  "Black ink illustration on fully transparent background, for laser engraving on metal.",
+  "Style: premium monogram / engraving seal — balanced between bold silhouette and fine etching.",
+  "Use confident strokes with subtle internal detail: hatching, fine lines, or controlled texture where it adds character.",
+  "The design should feel crafted and high-end, not like a generic flat icon.",
+  "Strong outer silhouette, elegant proportions, centered composition.",
+  "No color, no shadow, no background, no text, no decorative frame.",
+  "Output must be pure black on transparent — crisp edges, suitable for laser.",
+  `Subject: ${cleanPrompt}`
+].join(" ");
     const result   = await openai.images.generate({ model:"gpt-image-1", prompt:finalPrompt, size:"1024x1024", background:"transparent", output_format:"png", quality:"medium", n:imageCount });
     const logos=[], creationsToSave=[];
     const category = detectCategory(cleanPrompt);
