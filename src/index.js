@@ -7,9 +7,28 @@ import sharp from "sharp";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { createClient } from "@supabase/supabase-js";
 import { fileURLToPath } from "url";
+import rateLimit from "express-rate-limit";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
+
+// ─── Validation des variables d'environnement au démarrage ───────────────────
+const REQUIRED_ENV = [
+  "OPENAI_API_KEY",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SHOPIFY_STORE",
+  "SHOPIFY_CLIENT_ID",
+  "SHOPIFY_CLIENT_SECRET",
+  "PUBLIC_BASE_URL",
+  "ADMIN_SECRET_TOKEN"
+];
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length) {
+  console.error("❌ Variables d'environnement manquantes :", missingEnv.join(", "));
+  process.exit(1);
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -59,6 +78,70 @@ for (const name of fontFiles) {
   } else {
     console.warn(`Police introuvable : ${name}`);
   }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Sécurité : Origin whitelist ─────────────────────────────────────────────
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map(o => o.trim())
+  .filter(Boolean);
+
+function checkOrigin(req, res, next) {
+  // En dev local, pas de vérification
+  if (process.env.NODE_ENV === "development") return next();
+
+  const origin = req.headers.origin || req.headers.referer || "";
+
+  // Toujours autoriser Railway lui-même (appels internes)
+  if (!origin) return next();
+
+  const allowed = ALLOWED_ORIGINS.some(o => origin.startsWith(o));
+  if (!allowed) {
+    console.warn(`Origin bloquée : ${origin}`);
+    return res.status(403).json({ error: "Accès non autorisé." });
+  }
+  next();
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Sécurité : Rate limiters ────────────────────────────────────────────────
+
+// Génération IA — 10 appels / 10 min par IP (coûteux)
+const aiLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { code: "RATE_LIMIT", error: "Trop de générations. Réessayez dans quelques minutes." }
+});
+
+// Uploads / renders — 30 appels / min par IP
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Trop de requêtes. Réessayez dans un moment." }
+});
+
+// Votes galerie — 20 votes / 5 min par IP (anti-spam notes)
+const rateLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Trop de votes. Réessayez dans quelques minutes." }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Sécurité : Auth admin ───────────────────────────────────────────────────
+function checkAdminToken(req, res, next) {
+  const token = req.body?.token || req.headers["x-admin-token"] || "";
+  if (!token || token !== process.env.ADMIN_SECRET_TOKEN) {
+    return res.status(401).json({ error: "Non autorisé." });
+  }
+  next();
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -272,7 +355,7 @@ app.get("/api/fonts", (req,res) => res.json({ fonts: fontFiles }));
 // ── Sert les fichiers TTF au navigateur client pour FontFace API ─────────────
 app.get("/fonts/:fontName", (req, res) => {
   const name     = req.params.fontName;
-  const safeName = path.basename(name); // sécurité : pas de path traversal
+  const safeName = path.basename(name);
   const ttfPath  = path.join(fontsDir, safeName);
   const otfPath  = path.join(fontsDir, safeName.replace(/\.ttf$/i, ".otf"));
 
@@ -290,28 +373,31 @@ app.get("/fonts/:fontName", (req, res) => {
   }
   return res.status(404).json({ error: `Police introuvable : ${safeName}` });
 });
-// ─────────────────────────────────────────────────────────────────────────────
+
 app.get("/api/fonts/debug", (req,res) => {
   try { res.json({ fontsDir, files:fs.readdirSync(fontsDir), count:fs.readdirSync(fontsDir).length }); }
   catch(e) { res.json({ error:e.message, fontsDir }); }
 });
 
-app.post("/api/logos/search-or-generate", async (req,res) => {
+// ── Génération IA — protégée origin + rate limit ──────────────────────────────
+app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async (req,res) => {
   try {
     const { prompt, count=3 } = req.body||{};
     const cleanPrompt = String(prompt||"").trim();
     const imageCount  = Math.max(1,Math.min(Number(count)||3,3));
     if (!cleanPrompt) return res.status(400).json({ code:"MISSING_PROMPT", error:"Prompt image manquant." });
-    const baseUrl     = getBaseUrl(req);
+    const baseUrl = getBaseUrl(req);
     const finalPrompt = [
-  "Créer un pictogramme noir pour gravure laser.",
-  "Fond totalement transparent.",
-  "Visuel simple, propre, centré, lisible, sans décor, sans ombre, sans fond.",
-  "Style pictogramme professionnel, lignes franches, peu de détails fins.",
-  "Ne pas ajouter de texte ni de cadre.",
-  `Sujet: ${cleanPrompt}`
-].join(" ");
-    const result   = await openai.images.generate({ model:"gpt-image-1", prompt:finalPrompt, size:"1024x1024", background:"transparent", output_format:"png", quality:"medium", n:imageCount });
+      "Black ink illustration on fully transparent background, for laser engraving on metal.",
+      "Style: premium monogram / engraving seal — balanced between bold silhouette and fine etching.",
+      "Use confident strokes with subtle internal detail: hatching, fine lines, or controlled texture where it adds character.",
+      "The design should feel crafted and high-end, not like a generic flat icon.",
+      "Strong outer silhouette, elegant proportions, centered composition.",
+      "No color, no shadow, no background, no text, no decorative frame.",
+      "Output must be pure black on transparent — crisp edges, suitable for laser.",
+      `Subject: ${cleanPrompt}`
+    ].join(" ");
+    const result = await openai.images.generate({ model:"gpt-image-1", prompt:finalPrompt, size:"1024x1024", background:"transparent", output_format:"png", quality:"medium", n:imageCount });
     const logos=[], creationsToSave=[];
     const category = detectCategory(cleanPrompt);
     for (let i=0;i<(result.data||[]).length;i++) {
@@ -338,10 +424,8 @@ app.post("/api/logos/search-or-generate", async (req,res) => {
   }
 });
 
-// ─── /api/render/production-from-image ───────────────────────────────────────
-// Reçoit le PNG base64 capturé par html2canvas.
-// Supprime le fond clair → transparent, met les éléments en noir #111111.
-app.post("/api/render/production-from-image", async (req, res) => {
+// ── Render production — protégé origin + upload limiter ───────────────────────
+app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async (req, res) => {
   try {
     const {
       imageBase64,
@@ -355,102 +439,52 @@ app.post("/api/render/production-from-image", async (req, res) => {
       flippedRight = false
     } = req.body || {};
 
-    if (!imageBase64) {
-      return res.status(400).json({ error: "imageBase64 manquant." });
-    }
+    if (!imageBase64) return res.status(400).json({ error: "imageBase64 manquant." });
 
     const baseUrl = getBaseUrl(req);
-
-    // ── Extraction robuste du base64 ─────────────────────────────────────────
     let base64Data = imageBase64;
     const commaIndex = imageBase64.indexOf(",");
-    if (commaIndex !== -1) {
-      base64Data = imageBase64.slice(commaIndex + 1);
-    }
-    // Nettoyage des caractères invalides base64
+    if (commaIndex !== -1) base64Data = imageBase64.slice(commaIndex + 1);
     base64Data = base64Data.replace(/[^A-Za-z0-9+/=]/g, "");
-
-    if (!base64Data || base64Data.length < 100) {
-      return res.status(400).json({ error: "Image base64 invalide ou vide." });
-    }
+    if (!base64Data || base64Data.length < 100) return res.status(400).json({ error: "Image base64 invalide ou vide." });
 
     const inputBuffer = Buffer.from(base64Data, "base64");
-    console.log(`Production image buffer : ${inputBuffer.length} bytes`);
+    if (inputBuffer.length < 100) return res.status(400).json({ error: "Buffer image trop petit, capture échouée." });
 
-    if (inputBuffer.length < 100) {
-      return res.status(400).json({ error: "Buffer image trop petit, capture échouée." });
-    }
-
-    // ── Traitement Sharp : fond → transparent, éléments → noir ───────────────
     const meta = await sharp(inputBuffer).metadata();
     const { width, height } = meta;
-
-    const { data: rawPixels } = await sharp(inputBuffer)
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const pixels      = Buffer.from(rawPixels);
+    const { data: rawPixels } = await sharp(inputBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const pixels = Buffer.from(rawPixels);
     const totalPixels = width * height;
 
     for (let i = 0; i < totalPixels; i++) {
       const o = i * 4;
       const r = pixels[o], g = pixels[o+1], b = pixels[o+2], a = pixels[o+3];
-
-      // Pixel transparent → on garde transparent
-      if (a < 30) {
-        pixels[o] = pixels[o+1] = pixels[o+2] = pixels[o+3] = 0;
-        continue;
-      }
-
-      // Luminosité
+      if (a < 30) { pixels[o] = pixels[o+1] = pixels[o+2] = pixels[o+3] = 0; continue; }
       const lum = r * 0.299 + g * 0.587 + b * 0.114;
-
-      if (lum > 180) {
-        // Fond clair → transparent
-        pixels[o] = pixels[o+1] = pixels[o+2] = pixels[o+3] = 0;
-      } else {
-        // Élément foncé → noir opaque
-        pixels[o] = pixels[o+1] = pixels[o+2] = 17;
-        pixels[o+3] = 255;
-      }
+      if (lum > 180) { pixels[o] = pixels[o+1] = pixels[o+2] = pixels[o+3] = 0; }
+      else { pixels[o] = pixels[o+1] = pixels[o+2] = 17; pixels[o+3] = 255; }
     }
 
-    const productionBuffer = await sharp(pixels, {
-      raw: { width, height, channels: 4 }
-    }).png().toBuffer();
-
-    // Sauvegarde locale
-    // Nommage : couleur-dimension-epaisseur-timestamp
+    const productionBuffer = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
     const timestamp = new Date().toISOString().replace(/[-:T]/g,"").slice(0,14);
     const fileName  = `${slugify(color)}-${slugify(dimension)}-${normalizeThickness(thickness)}mm-${timestamp}.png`;
     fs.writeFileSync(path.join(productionDir, fileName), productionBuffer);
     const localUrl = `${baseUrl}/generated/production/${fileName}`;
 
-    // Upload Shopify
     let shopifyUrl = null, shopifyFileId = null;
     try {
       const altText = [`Plaque ${dimension}`, color, thickness+"mm", line1, line2, line3].filter(Boolean).join(" | ");
       const uploaded = await uploadImageToShopify(productionBuffer, fileName, altText);
-      shopifyUrl    = uploaded.url;
-      shopifyFileId = uploaded.id;
-    } catch(e) {
-      console.error("Shopify production upload failed:", e.message);
-    }
+      shopifyUrl = uploaded.url; shopifyFileId = uploaded.id;
+    } catch(e) { console.error("Shopify production upload failed:", e.message); }
 
-    return res.json({
-      url:           shopifyUrl || localUrl,
-      shopifyUrl,
-      shopifyFileId,
-      localUrl
-    });
-
+    return res.json({ url: shopifyUrl || localUrl, shopifyUrl, shopifyFileId, localUrl });
   } catch(error) {
     console.error("Erreur /api/render/production-from-image :", error);
     return res.status(500).json({ error: error?.message || "Erreur interne génération production." });
   }
 });
-// ─────────────────────────────────────────────────────────────────────────────
 
 const RUE_VARIANT_MAP = {
   "150x100mm": {
@@ -476,23 +510,18 @@ const RUE_VARIANT_MAP = {
   }
 };
 
-app.post("/api/variant/resolve", async (req,res) => {
+app.post("/api/variant/resolve", checkOrigin, async (req,res) => {
   try {
     const dimension=normalizeDimension(req.body?.dimension||""), thickness=normalizeThickness(req.body?.thickness||""), color=normalizeColor(req.body?.color||"");
     const fixation = req.body?.fixation || null;
     const productHandle = req.body?.productHandle || null;
-
     if (!dimension||!thickness||!color) return res.status(400).json({error:"Dimension, épaisseur ou couleur manquante."});
-
-    // Plaque de rue — RUE_VARIANT_MAP
     if (productHandle && productHandle.includes("rue")) {
       const epFix = thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
       const found = RUE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
       if (found) return res.json(found);
       return res.status(404).json({error:`Variant rue introuvable: ${dimension} / ${epFix} / ${color}`});
     }
-
-    // Plaque BAL — VARIANT_MAP
     const allowed = ALLOWED_THICKNESS_BY_COLOR[color];
     if (!allowed) return res.status(404).json({error:"Couleur introuvable."});
     if (!allowed.includes(thickness)) return res.status(400).json({error:`L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`});
@@ -526,158 +555,77 @@ app.get("/api/gallery/random", async (req,res) => {
   } catch(e) { console.error(e); res.status(500).json({error:"gallery error"}); }
 });
 
-// ── /api/gallery/rate ─────────────────────────────────────────────────────
-// Enregistre une note (1-5 étoiles) anonyme dans Supabase
-// Table attendue : gallery_ratings (id, image_url, stars, created_at)
-// Note moyenne calculée côté serveur et renvoyée au client
-app.post("/api/gallery/rate", async (req, res) => {
+// ── Notes galerie — rate limité anti-spam ─────────────────────────────────────
+app.post("/api/gallery/rate", checkOrigin, rateLimiter, async (req, res) => {
   try {
     const { imageUrl, stars } = req.body || {};
-    if (!imageUrl || !stars || stars < 1 || stars > 5) {
-      return res.status(400).json({ error: "imageUrl et stars (1-5) requis" });
-    }
-
-    // Insère ou met à jour le vote (on stocke chaque vote, pas d'identifiant user)
-    const { error: insertError } = await supabase
-      .from("gallery_ratings")
-      .insert({ image_url: imageUrl, stars: Number(stars) });
-
-    if (insertError) {
-      console.error("Rate insert error:", insertError.message);
-      // Si la table n'existe pas encore, on renvoie quand même un résultat
-      return res.json({ avg: Number(stars), count: 1 });
-    }
-
-    // Calcule la moyenne pour cette image
-    const { data, error: avgError } = await supabase
-      .from("gallery_ratings")
-      .select("stars")
-      .eq("image_url", imageUrl);
-
-    if (avgError || !data || !data.length) {
-      return res.json({ avg: Number(stars), count: 1 });
-    }
-
+    if (!imageUrl || !stars || stars < 1 || stars > 5) return res.status(400).json({ error: "imageUrl et stars (1-5) requis" });
+    const { error: insertError } = await supabase.from("gallery_ratings").insert({ image_url: imageUrl, stars: Number(stars) });
+    if (insertError) { console.error("Rate insert error:", insertError.message); return res.json({ avg: Number(stars), count: 1 }); }
+    const { data, error: avgError } = await supabase.from("gallery_ratings").select("stars").eq("image_url", imageUrl);
+    if (avgError || !data || !data.length) return res.json({ avg: Number(stars), count: 1 });
     const count = data.length;
     const avg   = data.reduce((sum, r) => sum + r.stars, 0) / count;
     res.json({ avg: Math.round(avg * 10) / 10, count });
-
-  } catch (e) {
-    console.error("Erreur /api/gallery/rate:", e.message);
-    res.status(500).json({ error: "rating error" });
-  }
+  } catch (e) { console.error("Erreur /api/gallery/rate:", e.message); res.status(500).json({ error: "rating error" }); }
 });
 
-// ── /api/gallery/increment-use ────────────────────────────────────────────
-// Incrémente le compteur d'utilisation quand une image est ajoutée au panier
-app.post("/api/gallery/increment-use", async (req, res) => {
+app.post("/api/gallery/increment-use", checkOrigin, async (req, res) => {
   try {
     const { imageUrl } = req.body || {};
     if (!imageUrl) return res.status(400).json({ error: "imageUrl requis" });
-
-    // Incrément via RPC Supabase ou update direct
     const { error } = await supabase.rpc("increment_gallery_use", { p_image_url: imageUrl });
     if (error) {
-      // Fallback : update manuel
-      const { error: upErr } = await supabase
-        .from("gallery_items")
-        .update({ use_count: supabase.raw("use_count + 1") })
-        .eq("image_url", imageUrl);
+      const { error: upErr } = await supabase.from("gallery_items").update({ use_count: supabase.raw("use_count + 1") }).eq("image_url", imageUrl);
       if (upErr) console.error("increment-use fallback error:", upErr.message);
     }
-
     res.json({ ok: true });
-  } catch (e) {
-    console.error("Erreur /api/gallery/increment-use:", e.message);
-    res.status(500).json({ error: "increment error" });
-  }
+  } catch (e) { console.error("Erreur /api/gallery/increment-use:", e.message); res.status(500).json({ error: "increment error" }); }
 });
 
-// ── /api/gallery/recategorize ─────────────────────────────────────────────
-// Recatégorise TOUTES les images en base selon les mots-clés actuels
-// Appel unique depuis le dashboard admin
-app.post("/api/gallery/recategorize", async (req, res) => {
+// ── Recatégorisation — protégée par token admin ───────────────────────────────
+app.post("/api/gallery/recategorize", checkAdminToken, async (req, res) => {
   try {
     const { data, error } = await supabase.from("gallery_items").select("id,prompt,category").eq("in_gallery", true);
     if (error) return res.status(500).json({ error: error.message });
-
     let updated = 0;
     for (const item of data) {
       const newCat = detectCategory(item.prompt || "");
-      if (newCat !== item.category) {
-        await supabase.from("gallery_items").update({ category: newCat }).eq("id", item.id);
-        updated++;
-      }
+      if (newCat !== item.category) { await supabase.from("gallery_items").update({ category: newCat }).eq("id", item.id); updated++; }
     }
     res.json({ ok: true, total: data.length, updated, message: `${updated} images recatégorisées sur ${data.length}` });
-  } catch(e) {
-    console.error("Erreur recategorize:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { console.error("Erreur recategorize:", e.message); res.status(500).json({ error: e.message }); }
 });
 
-// ── /api/realized/save ────────────────────────────────────────────────────
-// Sauvegarde une réalisation client — NON BLOQUANT : répond toujours 200
-// même si Shopify ou Supabase échoue, pour ne jamais crasher le serveur
-app.post("/api/realized/save", async (req, res) => {
-  // Traitement synchrone pour retourner l'URL à l'appelant
+// ── Sauvegarde réalisation — protégée origin + upload limiter ─────────────────
+app.post("/api/realized/save", checkOrigin, uploadLimiter, async (req, res) => {
   try {
     const { imageBase64, color, dimension, thickness, leftLogoUrl, rightLogoUrl } = req.body || {};
     if (!imageBase64) return res.json({ ok: true });
-
-    // Upload image colorée sur Shopify pour miniature panier
     const base64Data  = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     const inputBuffer = Buffer.from(base64Data, "base64");
-    const optimized   = await sharp(inputBuffer)
-      .resize(1200, 300, { fit: "inside", withoutEnlargement: true })
-      .png({ compressionLevel: 8 })
-      .toBuffer();
-
+    const optimized   = await sharp(inputBuffer).resize(1200, 300, { fit: "inside", withoutEnlargement: true }).png({ compressionLevel: 8 }).toBuffer();
     const timestamp = Date.now();
     const fileName  = `realized-${(color||"plaque").replace(/[^a-z0-9-]/gi,"")}-${timestamp}.png`;
     const localPath = path.join(productionDir, fileName);
     fs.writeFileSync(localPath, optimized);
     const baseUrl  = process.env.PUBLIC_BASE_URL || "https://simulateur-pag.up.railway.app";
     const localUrl = `${baseUrl}/generated/production/${fileName}`;
-
     let finalUrl = localUrl;
-    try {
-      const result = await uploadImageToShopify(optimized, fileName, "Réalisation plaque");
-      if (result?.url) finalUrl = result.url;
-    } catch(e) {
-      console.warn("Realized Shopify upload failed:", e.message);
-    }
-
-    // Retourne l'URL immédiatement
+    try { const result = await uploadImageToShopify(optimized, fileName, "Réalisation plaque"); if (result?.url) finalUrl = result.url; } catch(e) { console.warn("Realized Shopify upload failed:", e.message); }
     res.json({ ok: true, url: finalUrl });
-
-    // Sauvegarde Supabase en arrière-plan si logo présent
     if (leftLogoUrl || rightLogoUrl) {
       (async () => {
         try {
-          await supabase.from("realized_plaques").insert({
-            image_url:     finalUrl,
-            color:         color      || null,
-            dimension:     dimension  || null,
-            thickness:     thickness  || null,
-            left_logo_url:  leftLogoUrl  || null,
-            right_logo_url: rightLogoUrl || null,
-            created_at:    new Date().toISOString()
-          });
+          await supabase.from("realized_plaques").insert({ image_url:finalUrl, color:color||null, dimension:dimension||null, thickness:thickness||null, left_logo_url:leftLogoUrl||null, right_logo_url:rightLogoUrl||null, created_at:new Date().toISOString() });
         } catch(e) { console.warn("Supabase realized error:", e.message); }
       })();
     }
-
-  } catch(e) {
-    console.error("Realized save error:", e.message);
-    res.json({ ok: false });
-  }
-
+  } catch(e) { console.error("Realized save error:", e.message); res.json({ ok: false }); }
 });
 
-// ── /api/upload-base64 ────────────────────────────────────────────────────
-// Upload une image base64 directement sur Shopify sans traitement
-app.post("/api/upload-base64", async (req, res) => {
+// ── Upload base64 — protégé origin + upload limiter ───────────────────────────
+app.post("/api/upload-base64", checkOrigin, uploadLimiter, async (req, res) => {
   try {
     const { imageBase64, filename } = req.body || {};
     if (!imageBase64) return res.status(400).json({ error: "imageBase64 requis" });
@@ -686,38 +634,21 @@ app.post("/api/upload-base64", async (req, res) => {
     const fname = filename || `preview-${Date.now()}.png`;
     const result = await uploadImageToShopify(buffer, fname, "Aperçu plaque");
     res.json({ ok: true, url: result.url });
-  } catch(e) {
-    console.error("Erreur /api/upload-base64:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { console.error("Erreur /api/upload-base64:", e.message); res.status(500).json({ error: e.message }); }
 });
 
-// ── /api/logo/process ─────────────────────────────────────────────────────
-// Traite un logo uploadé par le client :
-// 1. Analyse si fond transparent + N&B → direct
-// 2. Tente suppression fond blanc + conversion N&B via Sharp
-// 3. Si échec → envoi à l'IA pour transformation
-app.post("/api/logo/process", async (req, res) => {
+// ── Traitement logo client — protégé origin + upload limiter ──────────────────
+app.post("/api/logo/process", checkOrigin, uploadLimiter, async (req, res) => {
   try {
     const { imageBase64 } = req.body || {};
     if (!imageBase64) return res.status(400).json({ error: "imageBase64 requis" });
-
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     const inputBuffer = Buffer.from(base64Data, "base64");
-
     const meta = await sharp(inputBuffer).metadata();
     const hasAlpha = meta.channels === 4;
-
-    // Récupère les pixels RGBA
-    const { data, info } = await sharp(inputBuffer)
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
+    const { data, info } = await sharp(inputBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const pixels = new Uint8Array(data);
     const w = info.width, h = info.height;
-
-    // Analyse le fond : compte les pixels transparents et les pixels "blancs"
     let transparentCount = 0, whiteCount = 0, totalVisible = 0;
     for (let i = 0; i < pixels.length; i += 4) {
       const r = pixels[i], g = pixels[i+1], b = pixels[i+2], a = pixels[i+3];
@@ -725,93 +656,51 @@ app.post("/api/logo/process", async (req, res) => {
       totalVisible++;
       if (r > 220 && g > 220 && b > 220) whiteCount++;
     }
-
     const transparentRatio = transparentCount / (w * h);
-    const whiteRatio = totalVisible > 0 ? whiteCount / totalVisible : 0;
-    const needsProcessing = transparentRatio < 0.05; // peu ou pas de transparence
-
+    const needsProcessing = transparentRatio < 0.05;
     let processedPixels = Buffer.from(pixels);
     let method = "direct";
-
     if (needsProcessing) {
-      // Tente suppression fond blanc/clair + conversion N&B
       method = "canvas";
       for (let i = 0; i < processedPixels.length; i += 4) {
         const r = processedPixels[i], g = processedPixels[i+1], b = processedPixels[i+2];
         const brightness = (r * 0.299 + g * 0.587 + b * 0.114);
-        
-        // Fond blanc → transparent
-        if (r > 200 && g > 200 && b > 200) {
-          processedPixels[i+3] = 0;
-          continue;
-        }
-        // Pixels visibles → noir pur
-        processedPixels[i] = 0;
-        processedPixels[i+1] = 0;
-        processedPixels[i+2] = 0;
-        // Ajuste l'alpha selon la luminosité inverse
+        if (r > 200 && g > 200 && b > 200) { processedPixels[i+3] = 0; continue; }
+        processedPixels[i] = 0; processedPixels[i+1] = 0; processedPixels[i+2] = 0;
         processedPixels[i+3] = Math.min(255, Math.round((1 - brightness/255) * 255 * 1.5));
       }
     } else {
-      // Déjà fond transparent → juste convertir en noir
       method = "transparent";
       for (let i = 0; i < processedPixels.length; i += 4) {
-        const a = processedPixels[i+3];
-        if (a < 30) continue; // déjà transparent
-        processedPixels[i] = 0;
-        processedPixels[i+1] = 0;
-        processedPixels[i+2] = 0;
+        if (processedPixels[i+3] < 30) continue;
+        processedPixels[i] = 0; processedPixels[i+1] = 0; processedPixels[i+2] = 0;
       }
     }
-
-    // Génère le PNG final
-    const outputBuffer = await sharp(processedPixels, {
-      raw: { width: w, height: h, channels: 4 }
-    }).png().toBuffer();
-
-    // Upload sur Shopify CDN
+    const outputBuffer = await sharp(processedPixels, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
     const filename = `client-logo-${Date.now()}.png`;
     const result = await uploadImageToShopify(outputBuffer, filename, "Logo client");
-
     res.json({ ok: true, url: result.url, method });
-  } catch(e) {
-    console.error("Erreur /api/logo/process:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { console.error("Erreur /api/logo/process:", e.message); res.status(500).json({ error: e.message }); }
 });
 
-// ── /api/realized/delete ──────────────────────────────────────────────────
-app.post("/api/realized/delete", async (req, res) => {
+// ── Suppression réalisation — protégée token admin ────────────────────────────
+app.post("/api/realized/delete", checkAdminToken, async (req, res) => {
   try {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: "id requis" });
     const { error } = await supabase.from("realized_plaques").delete().eq("id", id);
     if (error) throw error;
     res.json({ ok: true });
-  } catch(e) {
-    console.error("Delete realized error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { console.error("Delete realized error:", e.message); res.status(500).json({ error: e.message }); }
 });
 
-// ── /api/realized ──────────────────────────────────────────────────────────
-// Retourne les réalisations pour la galerie publique
 app.get("/api/realized", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
-    const { data, error } = await supabase
-      .from("realized_plaques")
-      .select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at")
-      .not("left_logo_url", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-
+    const { data, error } = await supabase.from("realized_plaques").select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at").not("left_logo_url", "is", null).order("created_at", { ascending: false }).limit(limit);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ items: data || [] });
-  } catch(e) {
-    console.error("Erreur /api/realized:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { console.error("Erreur /api/realized:", e.message); res.status(500).json({ error: e.message }); }
 });
 
 app.listen(PORT, () => {
@@ -820,4 +709,5 @@ app.listen(PORT, () => {
   console.log("OPENAI_API_KEY présente :", !!process.env.OPENAI_API_KEY);
   console.log("SHOPIFY_STORE présent :", !!process.env.SHOPIFY_STORE);
   console.log("SUPABASE_URL présent :", !!process.env.SUPABASE_URL);
+  console.log("ALLOWED_ORIGINS :", process.env.ALLOWED_ORIGINS || "(non configuré)");
 });
