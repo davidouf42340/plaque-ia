@@ -387,16 +387,16 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async (req,res
     const imageCount  = Math.max(1,Math.min(Number(count)||3,3));
     if (!cleanPrompt) return res.status(400).json({ code:"MISSING_PROMPT", error:"Prompt image manquant." });
     const baseUrl = getBaseUrl(req);
-    const finalPrompt = [
-      "Black ink illustration on fully transparent background, for laser engraving on metal.",
-      "Style: premium monogram / engraving seal — balanced between bold silhouette and fine etching.",
-      "Use confident strokes with subtle internal detail: hatching, fine lines, or controlled texture where it adds character.",
-      "The design should feel crafted and high-end, not like a generic flat icon.",
-      "Strong outer silhouette, elegant proportions, centered composition.",
-      "No color, no shadow, no background, no text, no decorative frame.",
-      "Output must be pure black on transparent — crisp edges, suitable for laser.",
-      `Subject: ${cleanPrompt}`
-    ].join(" ");
+ const finalPrompt = [
+  "Black ink illustration on fully transparent background.",
+  "Style: clean vector icon with bold outlines and simple internal details.",
+  "Strong black contour lines, 2-3 key internal details only (eye, main features).",
+  "NO hatching, NO cross-hatching, NO fine textures, NO shading.",
+  "Simple enough for laser engraving on metal — bold and readable at small size.",
+  "NOT a flat silhouette — show main recognizable features with thick clean lines.",
+  "No color, no shadow, no background, no text, no frame.",
+  `Subject: ${cleanPrompt}`
+].join(" ");
     const result = await openai.images.generate({ model:"gpt-image-1", prompt:finalPrompt, size:"1024x1024", background:"transparent", output_format:"png", quality:"medium", n:imageCount });
     const logos=[], creationsToSave=[];
     const category = detectCategory(cleanPrompt);
