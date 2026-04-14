@@ -476,7 +476,7 @@ app.post("/api/realized/delete", checkAdminToken, async(req,res)=>{
 app.get("/api/realized",async(req,res)=>{
   try{
     const limit=Math.min(Number(req.query.limit)||100,500);
-    const{data,error}=await supabase.from("realized_plaques").select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at").not("left_logo_url","is",null).order("created_at",{ascending:false}).limit(limit);
+    const{data,error}=await supabase.from("realized_plaques").select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at").order("created_at",{ascending:false}).limit(limit);
     if(error)return res.status(500).json({error:error.message});
     res.json({items:data||[]});
   }catch(e){console.error("Erreur /api/realized:",e.message);res.status(500).json({error:e.message});}
