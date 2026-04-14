@@ -41,7 +41,21 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    },
+    db: {
+      schema: "public"
+    },
+    global: {
+      headers: {
+        "x-supabase-auth-override-role": "service_role"
+      }
+    }
+  }
 );
 
 const generatedDir  = path.join(__dirname, "..", "generated");
