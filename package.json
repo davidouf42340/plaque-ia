@@ -13,5 +13,6 @@
     "express": "^4.21.2",
     "openai": "^4.104.0",
     "sharp": "^0.33.5"
+    "express-rate-limit": "^7.0.0"
   }
 }
