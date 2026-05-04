@@ -79,27 +79,48 @@ function checkAdminToken(req, res, next) {
   next();
 }
 
-const aiLimiter = rateLimit({ windowMs:10*60*1000, max:10, standardHeaders:true, legacyHeaders:false, message:{code:"RATE_LIMIT",error:"Trop de générations. Réessayez dans quelques minutes."} });
+const aiLimiter     = rateLimit({ windowMs:10*60*1000, max:10, standardHeaders:true, legacyHeaders:false, message:{code:"RATE_LIMIT",error:"Trop de générations. Réessayez dans quelques minutes."} });
 const uploadLimiter = rateLimit({ windowMs:60*1000, max:30, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de requêtes. Réessayez dans un moment."} });
-const rateLimiter = rateLimit({ windowMs:5*60*1000, max:20, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de votes. Réessayez dans quelques minutes."} });
+const rateLimiter   = rateLimit({ windowMs:5*60*1000, max:20, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de votes. Réessayez dans quelques minutes."} });
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getBaseUrl(req) { return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`; }
-function slugify(value="") { return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"").slice(0,80); }
-function normalizeDimension(value="") { return String(value).trim().toLowerCase().replaceAll(" ",""); }
-function normalizeThickness(value="") { return String(value).trim().toLowerCase().replace("mm","").replace(",",".").trim(); }
-function normalizeColor(value="") {
-  const v=String(value).trim().toLowerCase();
-  const map={"acier brossé":"acier-brosse","acier-brosse":"acier-brosse","acier":"acier-brosse","or brossé":"or","or":"or","cuivre":"cuivre","blanc":"blanc","noir":"noir","noir brillant":"noir-brillant","noir-brillant":"noir-brillant","gris":"gris","noyer":"noyer","rose":"rose"};
-  return map[v]||v;
+function slugify(v="") { return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"").slice(0,80); }
+
+// ─── Normalisation — adaptée à la nouvelle boutique ──────────────────────────
+// BAL : option1=Couleur ("Acier Brossé","Or Brossé"...), option2=Dimension ("100X25mm"),  option3=Epaisseur ("1.6 mm")
+// Rue : option1=Dimension, option2=Epaisseur-Fixation, option3=Couleur ("Acier brossé")
+
+function normalizeDimension(value="") {
+  return String(value).trim().toLowerCase().replaceAll(" ","");
 }
+
+function normalizeThickness(value="") {
+  return String(value).trim().toLowerCase().replace("mm","").replace(",",".").replace(" ","").trim();
+}
+
+function normalizeColor(value="") {
+  const v = String(value).trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const map = {
+    // Nouvelles valeurs BAL (avec majuscules et accents)
+    "acier brosse":"acier-brosse","acier brose":"acier-brosse",
+    "acier-brosse":"acier-brosse","acier":"acier-brosse",
+    "or brosse":"or","or brose":"or","or":"or",
+    "cuivre":"cuivre","blanc":"blanc","noir":"noir",
+    "noir brillant":"noir-brillant","noir-brillant":"noir-brillant",
+    "gris":"gris","noyer":"noyer","rose":"rose"
+  };
+  return map[v] || v;
+}
+
 function hashString(str="") { let h=0; for(let i=0;i<str.length;i++){h=((h<<5)-h)+str.charCodeAt(i);h|=0;} return Math.abs(h); }
 function pickGalleryIndex(prompt="",items=[]) { if(!Array.isArray(items)||!items.length)return 0; return hashString(`${prompt}__${items.map(x=>x.fileBase||x.id||x.url||"").join("|")}`)%items.length; }
 
 async function saveCreationBatch({prompt,category,creations=[]}) {
   const createdAt=new Date().toISOString(),groupId=`grp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,galIdx=pickGalleryIndex(prompt,creations);
   const entries=creations.map((entry,i)=>({id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${i+1}`,group_id:groupId,created_at:createdAt,prompt,category,in_gallery:i===galIdx,image_url:entry.imageUrl,local_url:entry.localUrl||null,shopify_url:entry.shopifyUrl||null,shopify_file_id:entry.shopifyFileId||null}));
-  const {data,error}=await supabase.from("gallery_items").insert(entries).select();
+  const{data,error}=await supabase.from("gallery_items").insert(entries).select();
   if(error)throw new Error(`Supabase insert failed: ${error.message}`);
   return data||[];
 }
@@ -124,11 +145,65 @@ async function getRandomGalleryItems(limit=12) {
   return [...(data||[])].sort(()=>0.5-Math.random()).slice(0,limit);
 }
 
-const ALLOWED_THICKNESS_BY_COLOR={"acier-brosse":["1.6","3.2"],"or":["1.6","3.2"],"cuivre":["1.6","3.2"],"blanc":["1.6","3.2"],"noir":["1.6","3.2"],"noir-brillant":["1.6"],"gris":["1.6"],"noyer":["1.6"],"rose":["1.6"]};
+const ALLOWED_THICKNESS_BY_COLOR = {
+  "acier-brosse":["1.6","3.2"],"or":["1.6","3.2"],"cuivre":["1.6","3.2"],
+  "blanc":["1.6","3.2"],"noir":["1.6","3.2"],
+  "noir-brillant":["1.6","3.2"],"gris":["1.6","3.2"],"noyer":["1.6","3.2"],"rose":["1.6","3.2"]
+};
 
-const VARIANT_MAP={"100x25mm":{"1.6":{"acier-brosse":{variantId:53526180430151},"or":{variantId:53556221837639},"cuivre":{variantId:53556222165319},"noir":{variantId:53556222492999},"blanc":{variantId:53556222820679},"noir-brillant":{variantId:53556223148359},"noyer":{variantId:53556223476039},"gris":{variantId:53556223803719},"rose":{variantId:53556224131399}},"3.2":{"acier-brosse":{variantId:53526183870791},"or":{variantId:53556221870407},"cuivre":{variantId:53556222198087},"noir":{variantId:53556222525767},"blanc":{variantId:53556222853447}}},"150x37mm":{"1.6":{"acier-brosse":{variantId:53526180462919},"or":{variantId:53556221903175},"cuivre":{variantId:53556222230855},"noir":{variantId:53556222558535},"blanc":{variantId:53556222886215},"noir-brillant":{variantId:53556223213895},"noyer":{variantId:53556223541575},"gris":{variantId:53556223869255},"rose":{variantId:53556224196935}},"3.2":{"acier-brosse":{variantId:53526183903559},"or":{variantId:53556221935943},"cuivre":{variantId:53556222263623},"noir":{variantId:53556222591303},"blanc":{variantId:53556222918983}}},"200x50mm":{"1.6":{"acier-brosse":{variantId:53526180495687},"or":{variantId:53556221968711},"cuivre":{variantId:53556222296391},"noir":{variantId:53556222624071},"blanc":{variantId:53556222951751},"noir-brillant":{variantId:53556223279431},"noyer":{variantId:53556223607111},"gris":{variantId:53556223934791},"rose":{variantId:53556224262471}},"3.2":{"acier-brosse":{variantId:53526183936327},"or":{variantId:53556222001479},"cuivre":{variantId:53556222329159},"noir":{variantId:53556222656839},"blanc":{variantId:53556222984519}}},"250x87mm":{"1.6":{"acier-brosse":{variantId:53526180528455},"or":{variantId:53556222034247},"cuivre":{variantId:53556222361927},"noir":{variantId:53556222689607},"blanc":{variantId:53556223017287},"noir-brillant":{variantId:53556223344967},"noyer":{variantId:53556223672647},"gris":{variantId:53556224000327},"rose":{variantId:53556224328007}},"3.2":{"acier-brosse":{variantId:53526183969095},"or":{variantId:53556222067015},"cuivre":{variantId:53556222394695},"noir":{variantId:53556222722375},"blanc":{variantId:53556223050055}}},"300x100mm":{"1.6":{"acier-brosse":{variantId:53526180561223},"or":{variantId:53556222099783},"cuivre":{variantId:53556222427463},"noir":{variantId:53556222755143},"blanc":{variantId:53556223082823},"noir-brillant":{variantId:53556223410503},"noyer":{variantId:53556223738183},"gris":{variantId:53556224065863},"rose":{variantId:53556224393543}},"3.2":{"acier-brosse":{variantId:53526184001863},"or":{variantId:53556222132551},"cuivre":{variantId:53556222460231},"noir":{variantId:53556222787911},"blanc":{variantId:53556223115591}}}};
+// ─── VARIANT_MAP BAL — nouvelle boutique ─────────────────────────────────────
+// Générés depuis products.json du 04/05/2026
+// option1=Couleur, option2=Dimension, option3=Épaisseur
+const VARIANT_MAP = {
+  "100x25mm":{
+    "1.6":{"acier-brosse":{variantId:53152486228331},"or":{variantId:53152486556011},"cuivre":{variantId:53152486883691},"noir":{variantId:53152487211371},"blanc":{variantId:53152487539051},"noir-brillant":{variantId:53152487866731},"noyer":{variantId:53152488194411},"gris":{variantId:53152488522091},"rose":{variantId:53152488849771}},
+    "3.2":{"acier-brosse":{variantId:53152486261099},"or":{variantId:53152486588779},"cuivre":{variantId:53152486916459},"noir":{variantId:53152487244139},"blanc":{variantId:53152487571819},"noir-brillant":{variantId:53152487899499},"noyer":{variantId:53152488227179},"gris":{variantId:53152488554859},"rose":{variantId:53152488882539}}
+  },
+  "150x37mm":{
+    "1.6":{"acier-brosse":{variantId:53152486293867},"or":{variantId:53152486621547},"cuivre":{variantId:53152486949227},"noir":{variantId:53152487276907},"blanc":{variantId:53152487604587},"noir-brillant":{variantId:53152487932267},"noyer":{variantId:53152488259947},"gris":{variantId:53152488587627},"rose":{variantId:53152488915307}},
+    "3.2":{"acier-brosse":{variantId:53152486326635},"or":{variantId:53152486654315},"cuivre":{variantId:53152486981995},"noir":{variantId:53152487309675},"blanc":{variantId:53152487637355},"noir-brillant":{variantId:53152487965035},"noyer":{variantId:53152488292715},"gris":{variantId:53152488620395},"rose":{variantId:53152488948075}}
+  },
+  "200x50mm":{
+    "1.6":{"acier-brosse":{variantId:53152486359403},"or":{variantId:53152486687083},"cuivre":{variantId:53152487014763},"noir":{variantId:53152487342443},"blanc":{variantId:53152487670123},"noir-brillant":{variantId:53152487997803},"noyer":{variantId:53152488325483},"gris":{variantId:53152488653163},"rose":{variantId:53152488980843}},
+    "3.2":{"acier-brosse":{variantId:53152486392171},"or":{variantId:53152486719851},"cuivre":{variantId:53152487047531},"noir":{variantId:53152487375211},"blanc":{variantId:53152487702891},"noir-brillant":{variantId:53152488030571},"noyer":{variantId:53152488358251},"gris":{variantId:53152488685931},"rose":{variantId:53152489013611}}
+  },
+  "250x87mm":{
+    "1.6":{"acier-brosse":{variantId:53152486424939},"or":{variantId:53152486752619},"cuivre":{variantId:53152487080299},"noir":{variantId:53152487407979},"blanc":{variantId:53152487735659},"noir-brillant":{variantId:53152488063339},"noyer":{variantId:53152488391019},"gris":{variantId:53152488718699},"rose":{variantId:53152489046379}},
+    "3.2":{"acier-brosse":{variantId:53152486457707},"or":{variantId:53152486785387},"cuivre":{variantId:53152487113067},"noir":{variantId:53152487440747},"blanc":{variantId:53152487768427},"noir-brillant":{variantId:53152488096107},"noyer":{variantId:53152488423787},"gris":{variantId:53152488751467},"rose":{variantId:53152489079147}}
+  },
+  "300x100mm":{
+    "1.6":{"acier-brosse":{variantId:53152486490475},"or":{variantId:53152486818155},"cuivre":{variantId:53152487145835},"noir":{variantId:53152487473515},"blanc":{variantId:53152487801195},"noir-brillant":{variantId:53152488128875},"noyer":{variantId:53152488456555},"gris":{variantId:53152488784235},"rose":{variantId:53152489111915}},
+    "3.2":{"acier-brosse":{variantId:53152486523243},"or":{variantId:53152486850923},"cuivre":{variantId:53152487178603},"noir":{variantId:53152487506283},"blanc":{variantId:53152487833963},"noir-brillant":{variantId:53152488161643},"noyer":{variantId:53152488489323},"gris":{variantId:53152488817003},"rose":{variantId:53152489144683}}
+  }
+};
 
-const CATEGORY_RULES=[{key:"animaux",words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou","cochon","vache","mouton","loup","renard","cerf","dauphin","baleine","crabe","homard","singe","gorille","girafe","zèbre","zebre","rhinocéros","rhinoceros","hippopotame","crocodile","alligator","grenouille","lizard","lézard","ara","perroquet","flamant","pingouin","manchot","ours","panda","koala","kangourou","loutre","castor","écureuil","ecureuil","hérisson","herisson","armadillo","chauve-souris","chauve souris","mante","abeille","papillon","libellule","araignée","araignee","scorpion","tortue","cameleon","caméléon"]},{key:"sport",words:["football","foot","basket","basketball","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon","ski","snowboard","surf","skateboard","roller","escalade","tir à l'arc","escrime","équitation","equitation","gym","gymnaste","handball","volleyball","volley","badminton","ping pong","bowling","billard","fléchettes","flechettes","poids","barbell","dumbbell","tapis","yoga","pilates","danse","athletisme","atletisme","sprint","saut","javelot","disque","perche","lutte","mma","taekwondo","aïkido","aikido","kung fu","capoeira"]},{key:"medical",words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","croix pharmacie","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine","pilule","médicament","medicament","ambulance","urgence","scalpel","bistouri","pince","compresse","bandage","plâtre","platre","fauteuil roulant","béquille","bequille","opticien","lunettes","otite","cardiologie","coeur","anatomie","squelette","os","dent","thermomètre","thermometre","tension","pression","sang","analyses","laboratoire","labo","radio","scanner","irm","psychologue","psy","cabinet","clinique"]},{key:"beaute",words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon","peigne","sèche-cheveux","seche cheveux","fer à lisser","fer a lisser","boucleur","rasoir","mousse","gel","vernis","rouge à lèvres","rouge a levres","fond de teint","mascara","eye-liner","eyeliner","sourcils","cils","épilation","epilation","manucure","pédicure","pedicure","beauty","lash","nail","tatouage","piercing","dermatologue","crème","creme","lotion","parfum","eau de toilette"]},{key:"restauration",words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse","assiette","verre","bouteille","bière","biere","champagne","whisky","sushi","pâtes","pates","salade","soupe","gâteau","gateau","dessert","chocolat","glace","confiserie","épicerie","epicerie","marché","marche","traiteur","snack","kebab","tacos","crêpe","crepe","gaufre","waffle","barbecue","bbq","steakhouse","rôtisserie","rotisserie","poissonnerie","boucherie","charcuterie","fromagerie","bar","brasserie","taverne","auberge","hôtel","hotel","fast food","fast-food","drive"]},{key:"batiment",words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux","peintre","peinture","menuisier","menuiserie","charpente","charpentier","couvreur","toiture","carreleur","carrelage","vitrier","vitrerie","serrurier","serrure","chauffagiste","climatisation","clim","isolation","insulation","façade","facade","terrassier","terrassement","génie civil","genie civil","ingénieur","ingenieur","architecte","architecture","grues","grue","bulldozer","pelleteuse","niveau","équerre","equerre","mètre","metre","règle","regle","cordeau","brouette","ciment","béton","beton","brique","parpaing","acier","ferrailleur","soudeur","soudure","démolition","demolition","rénovation","renovation","agrandissement","extension","villa","immeuble","appartement","chantier","plan","blueprint"]},{key:"nature",words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere","ocean","mer","vague","plage","sable","désert","desert","savane","jungle","tropique","palmier","bambou","cactus","herbe","prairie","colline","vallée","vallee","volcan","glacier","cascade","lac","étang","etang","marais","tourbière","tourbi","champignon","mousse","lichen","pin","chêne","chene","bouleau","sapin","cerisier","lavande","tournesol","coquelicot","marguerite","tulipe","orchidée","orchidee","lotus","nénuphar","nenuphar","algue","corail","mangrove","terrier","nid","ruche","toile araignée","toile araignee","météore","meteor","arc-en-ciel","aurore","brouillard","rosée","rosee","givre","neige","glace","vent","tempête","tempete"]},{key:"symboles",words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason","bouclier","épée","epee","bouclier","ancre","boussole","globe","monde","paix","infini","yin yang","étoile de david","croissant","om","trèfle","trefle","fer à cheval","fer a cheval","dreamcatcher","mandala","caducée","caducee","balance","justice","phare","clef","clé","cle","cadenas","cadre","ruban","nœud","noeud","aile","plume","main","poing","pouce","œil","oeil","pyramide","triangle","hexagone","octogone","cercle","spiral","galaxie","cosmos","atome","molécule","molecule","dna","adn","code","circuit","robot","intelligence artificielle","ia","wifi","bluetooth","numérique","numerique"]}];
+// ─── VARIANT_MAP RUE — nouvelle boutique ─────────────────────────────────────
+// option1=Dimension, option2=Épaisseur-Fixation, option3=Couleur
+const RUE_VARIANT_MAP = {
+  "150x100mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53152489177451},"or":{variantId:53152489210219},"cuivre":{variantId:53152489242987},"blanc":{variantId:53152489275755},"noir":{variantId:53152489308523},"gris":{variantId:53152489341291},"noyer":{variantId:53152489374059},"rose":{variantId:53152489406827}},
+    "1.6mm - À fixer":{"acier-brosse":{variantId:53152489439595},"or":{variantId:53152489472363},"cuivre":{variantId:53152489505131},"blanc":{variantId:53152489537899},"noir":{variantId:53152489570667}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53152489603435},"or":{variantId:53152489636203},"cuivre":{variantId:53152489668971},"blanc":{variantId:53152489701739},"noir":{variantId:53152489734507}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53152489767275},"or":{variantId:53152489800043},"cuivre":{variantId:53152489832811},"blanc":{variantId:53152489865579},"noir":{variantId:53152489898347}}
+  },
+  "200x133mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53152489931115},"or":{variantId:53152489963883},"cuivre":{variantId:53152489996651},"blanc":{variantId:53152490029419},"noir":{variantId:53152490062187},"gris":{variantId:53152490094955},"noyer":{variantId:53152490127723},"rose":{variantId:53152490160491}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53152490193259},"or":{variantId:53152490226027},"cuivre":{variantId:53152490258795},"blanc":{variantId:53152490291563},"noir":{variantId:53152490324331}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53152490357099},"or":{variantId:53152490389867},"cuivre":{variantId:53152490422635},"blanc":{variantId:53152490455403},"noir":{variantId:53152490488171}}
+  },
+  "250x167mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53152490520939},"or":{variantId:53152490553707},"cuivre":{variantId:53152490586475},"blanc":{variantId:53152490619243},"noir":{variantId:53152490652011},"gris":{variantId:53152490684779},"noyer":{variantId:53152490717547},"rose":{variantId:53152490750315}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53152490783083},"or":{variantId:53152490815851},"cuivre":{variantId:53152490848619},"blanc":{variantId:53152490881387},"noir":{variantId:53152490914155}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53152490946923},"or":{variantId:53152490979691},"cuivre":{variantId:53152491012459},"blanc":{variantId:53152491045227},"noir":{variantId:53152491077995}}
+  },
+  "300x200mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53152491110763},"or":{variantId:53152491143531},"cuivre":{variantId:53152491176299},"blanc":{variantId:53152491209067},"noir":{variantId:53152491241835},"gris":{variantId:53152491274603},"noyer":{variantId:53152491307371},"rose":{variantId:53152491340139}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53152491372907},"or":{variantId:53152491405675},"cuivre":{variantId:53152491438443},"blanc":{variantId:53152491471211},"noir":{variantId:53152491503979}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53152491536747},"or":{variantId:53152491569515},"cuivre":{variantId:53152491602283},"blanc":{variantId:53152491635051},"noir":{variantId:53152491667819}}
+  }
+};
+
+const CATEGORY_RULES=[{key:"animaux",words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou","cochon","vache","mouton","loup","renard","cerf","dauphin","baleine","crabe","homard","singe","gorille","girafe","zèbre","zebre","rhinocéros","rhinoceros","hippopotame","crocodile","alligator","grenouille","lizard","lézard","ara","perroquet","flamant","pingouin","manchot","ours","koala","kangourou","loutre","castor","écureuil","ecureuil","hérisson","herisson","armadillo","chauve-souris","chauve souris","mante","abeille","libellule","araignée","araignee","scorpion","cameleon","caméléon"]},{key:"sport",words:["football","foot","basket","basketball","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon","ski","snowboard","surf","skateboard","roller","escalade","escrime","équitation","equitation","gym","gymnaste","handball","volleyball","volley","badminton","ping pong","bowling","billard","fléchettes","flechettes","poids","barbell","dumbbell","yoga","pilates","danse","athletisme","atletisme","sprint","saut","javelot","disque","perche","lutte","mma","taekwondo","aikido","kung fu","capoeira"]},{key:"medical",words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine","pilule","médicament","medicament","ambulance","urgence","scalpel","bistouri","pince","compresse","bandage","fauteuil roulant","béquille","bequille","opticien","lunettes","cardiologie","coeur","anatomie","squelette","os","dent","thermomètre","thermometre","tension","sang","laboratoire","labo","radio","scanner","psychologue","cabinet","clinique"]},{key:"beaute",words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon","peigne","sèche-cheveux","seche cheveux","rasoir","mousse","gel","vernis","rouge à lèvres","rouge a levres","fond de teint","mascara","eyeliner","sourcils","cils","épilation","epilation","manucure","pédicure","pedicure","lash","nail","tatouage","piercing","dermatologue","crème","creme","lotion","parfum"]},{key:"restauration",words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse","assiette","verre","bouteille","bière","biere","champagne","whisky","sushi","pâtes","pates","salade","soupe","gâteau","gateau","dessert","chocolat","glace","confiserie","épicerie","epicerie","marché","marche","traiteur","snack","kebab","tacos","crêpe","crepe","gaufre","waffle","barbecue","bbq","steakhouse","rôtisserie","rotisserie","boucherie","fromagerie","bar","brasserie","taverne","auberge","hôtel","hotel","fast food","fast-food"]},{key:"batiment",words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux","peintre","peinture","menuisier","menuiserie","charpente","charpentier","couvreur","toiture","carreleur","carrelage","vitrier","serrurier","serrure","chauffagiste","climatisation","clim","isolation","façade","facade","terrassier","génie civil","genie civil","ingénieur","ingenieur","architecte","architecture","grue","bulldozer","pelleteuse","niveau","équerre","equerre","mètre","metre","ciment","béton","beton","brique","parpaing","ferrailleur","soudeur","démolition","demolition","rénovation","renovation","villa","immeuble","appartement","chantier","blueprint"]},{key:"nature",words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere","ocean","mer","vague","plage","sable","désert","desert","savane","jungle","tropique","palmier","bambou","cactus","herbe","prairie","colline","vallée","vallee","volcan","glacier","cascade","lac","étang","etang","marais","champignon","mousse","lichen","pin","chêne","chene","bouleau","sapin","cerisier","lavande","tournesol","coquelicot","marguerite","tulipe","orchidée","orchidee","lotus","algue","corail","nid","ruche","météore","meteor","arc-en-ciel","aurore","neige","glace","vent","tempête","tempete"]},{key:"symboles",words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason","bouclier","épée","epee","ancre","boussole","globe","monde","paix","infini","yin yang","trèfle","trefle","fer à cheval","fer a cheval","dreamcatcher","mandala","caducée","caducee","balance","justice","phare","clef","clé","cle","cadenas","ruban","nœud","noeud","aile","plume","main","poing","œil","oeil","pyramide","triangle","hexagone","cercle","spiral","galaxie","cosmos","atome","molécule","molecule","dna","adn","robot","intelligence artificielle","ia","wifi","numérique","numerique"]}];
 
 function detectCategory(prompt="") {
   const p=String(prompt||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
@@ -209,8 +284,6 @@ async function uploadImageToShopify(buffer,filename,alt="") {
   return{id:ready.id,url:ready.url};
 }
 
-const RUE_VARIANT_MAP={"150x100mm":{"1.6mm - À coller":{"acier-brosse":{variantId:53672841478471},"or":{variantId:53672841511239},"cuivre":{variantId:53672841544007},"blanc":{variantId:53672841576775},"noir":{variantId:53672841609543},"gris":{variantId:53672841642311},"noyer":{variantId:53672841675079},"rose":{variantId:53672841707847}},"1.6mm - À fixer":{"acier-brosse":{variantId:53672841740615},"or":{variantId:53672841773383},"cuivre":{variantId:53672841806151},"blanc":{variantId:53672841838919},"noir":{variantId:53672841871687}},"3.2mm - À coller":{"acier-brosse":{variantId:53672841904455},"or":{variantId:53672841937223},"cuivre":{variantId:53672841969991},"blanc":{variantId:53672842002759},"noir":{variantId:53672842035527}},"3.2mm - À fixer":{"acier-brosse":{variantId:53672842068295},"or":{variantId:53672842101063},"cuivre":{variantId:53672842133831},"blanc":{variantId:53672842166599},"noir":{variantId:53672842199367}}},"200x133mm":{"1.6mm - À coller":{"acier-brosse":{variantId:53672935194951},"or":{variantId:53672935227719},"cuivre":{variantId:53672935260487},"blanc":{variantId:53672935293255},"noir":{variantId:53672935326023},"gris":{variantId:53672935358791},"noyer":{variantId:53672935391559},"rose":{variantId:53672935424327}},"3.2mm - À coller":{"acier-brosse":{variantId:53672935457095},"or":{variantId:53672935489863},"cuivre":{variantId:53672935522631},"blanc":{variantId:53672935555399},"noir":{variantId:53672935588167}},"3.2mm - À fixer":{"acier-brosse":{variantId:53672935620935},"or":{variantId:53672935653703},"cuivre":{variantId:53672935686471},"blanc":{variantId:53672935719239},"noir":{variantId:53672935752007}}},"250x167mm":{"1.6mm - À coller":{"acier-brosse":{variantId:53672935784775},"or":{variantId:53672935817543},"cuivre":{variantId:53672935850311},"blanc":{variantId:53672935883079},"noir":{variantId:53672935915847},"gris":{variantId:53672935948615},"noyer":{variantId:53672935981383},"rose":{variantId:53672936014151}},"3.2mm - À coller":{"acier-brosse":{variantId:53672936046919},"or":{variantId:53672936079687},"cuivre":{variantId:53672936112455},"blanc":{variantId:53672936145223},"noir":{variantId:53672936177991}},"3.2mm - À fixer":{"acier-brosse":{variantId:53672936210759},"or":{variantId:53672936243527},"cuivre":{variantId:53672936276295},"blanc":{variantId:53672936309063},"noir":{variantId:53672936341831}}},"300x200mm":{"1.6mm - À coller":{"acier-brosse":{variantId:53672936374599},"or":{variantId:53672936407367},"cuivre":{variantId:53672936440135},"blanc":{variantId:53672936472903},"noir":{variantId:53672936505671},"gris":{variantId:53672936538439},"noyer":{variantId:53672936571207},"rose":{variantId:53672936603975}},"3.2mm - À coller":{"acier-brosse":{variantId:53672936636743},"or":{variantId:53672936669511},"cuivre":{variantId:53672936702279},"blanc":{variantId:53672936735047},"noir":{variantId:53672936767815}},"3.2mm - À fixer":{"acier-brosse":{variantId:53672936800583},"or":{variantId:53672936833351},"cuivre":{variantId:53672936866119},"blanc":{variantId:53672936898887},"noir":{variantId:53672936931655}}}};
-
 // ─── ROUTES ──────────────────────────────────────────────────────────────────
 
 app.get("/",       (req,res)=>res.json({ok:true,message:"Serveur configurateur plaque en ligne"}));
@@ -218,7 +291,7 @@ app.get("/health", (req,res)=>res.json({ok:true}));
 app.get("/api/fonts",(req,res)=>res.json({fonts:fontFiles}));
 
 app.get("/fonts/:fontName",(req,res)=>{
-  const name=req.params.fontName,safeName=path.basename(name);
+  const safeName=path.basename(req.params.fontName);
   const ttfPath=path.join(fontsDir,safeName),otfPath=path.join(fontsDir,safeName.replace(/\.ttf$/i,".otf"));
   if(fs.existsSync(ttfPath)){res.setHeader("Content-Type","font/ttf");res.setHeader("Access-Control-Allow-Origin","*");res.setHeader("Cache-Control","public, max-age=86400");return res.sendFile(ttfPath);}
   if(fs.existsSync(otfPath)){res.setHeader("Content-Type","font/otf");res.setHeader("Access-Control-Allow-Origin","*");res.setHeader("Cache-Control","public, max-age=86400");return res.sendFile(otfPath);}
@@ -278,7 +351,7 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
 // ── Render production ─────────────────────────────────────────────────────────
 app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(req,res)=>{
   try {
-    const{imageBase64,color="blanc",dimension="100x25mm",thickness="1.6",line1="",line2="",line3="",flippedLeft=false,flippedRight=false}=req.body||{};
+    const{imageBase64,color="blanc",dimension="100x25mm",thickness="1.6",line1="",line2="",line3=""}=req.body||{};
     if(!imageBase64)return res.status(400).json({error:"imageBase64 manquant."});
     const baseUrl=getBaseUrl(req);
     let base64Data=imageBase64;
@@ -313,22 +386,37 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
   } catch(error){console.error("Erreur /api/render/production-from-image :",error);return res.status(500).json({error:error?.message||"Erreur interne génération production."});}
 });
 
+// ── Résolution variant ────────────────────────────────────────────────────────
 app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
   try {
-    const dimension=normalizeDimension(req.body?.dimension||""),thickness=normalizeThickness(req.body?.thickness||""),color=normalizeColor(req.body?.color||"");
-    const fixation=req.body?.fixation||null,productHandle=req.body?.productHandle||null;
+    const rawColor=req.body?.color||"";
+    const rawDim=req.body?.dimension||"";
+    const rawThick=req.body?.thickness||"";
+    const fixation=req.body?.fixation||null;
+    const productHandle=req.body?.productHandle||null;
+
+    const color=normalizeColor(rawColor);
+    const dimension=normalizeDimension(rawDim);
+    const thickness=normalizeThickness(rawThick);
+
     if(!dimension||!thickness||!color)return res.status(400).json({error:"Dimension, épaisseur ou couleur manquante."});
+
     if(productHandle&&productHandle.includes("rue")){
       const epFix=thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
       const found=RUE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
       if(found)return res.json(found);
+      console.warn(`Variant rue introuvable: dim=${dimension} epFix=${epFix} color=${color} (raw: ${rawDim}/${rawThick}/${rawColor})`);
       return res.status(404).json({error:`Variant rue introuvable: ${dimension} / ${epFix} / ${color}`});
     }
+
     const allowed=ALLOWED_THICKNESS_BY_COLOR[color];
     if(!allowed)return res.status(404).json({error:"Couleur introuvable."});
     if(!allowed.includes(thickness))return res.status(400).json({error:`L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`});
     const found=VARIANT_MAP?.[dimension]?.[thickness]?.[color];
-    if(!found)return res.status(404).json({error:"Variant introuvable pour cette combinaison."});
+    if(!found){
+      console.warn(`Variant BAL introuvable: dim=${dimension} thick=${thickness} color=${color} (raw: ${rawDim}/${rawThick}/${rawColor})`);
+      return res.status(404).json({error:"Variant introuvable pour cette combinaison."});
+    }
     return res.json(found);
   } catch(error){console.error("Erreur /api/variant/resolve :",error);return res.status(500).json({error:"Erreur interne variant."});}
 });
@@ -390,7 +478,7 @@ app.post("/api/gallery/recategorize", checkAdminToken, async(req,res)=>{
   }catch(e){console.error("Erreur recategorize:",e.message);res.status(500).json({error:e.message});}
 });
 
-// ── Suppression image galerie IA — protégée token admin ───────────────────────
+// ── Suppression galerie IA ────────────────────────────────────────────────────
 app.post("/api/gallery/delete", checkAdminToken, async(req,res)=>{
   try{
     const{id}=req.body||{};
@@ -444,8 +532,8 @@ app.post("/api/logo/process", checkOrigin, uploadLimiter, async(req,res)=>{
     const{data,info}=await sharp(inputBuffer).ensureAlpha().raw().toBuffer({resolveWithObject:true});
     const pixels=new Uint8Array(data);
     const w=info.width,h=info.height;
-    let transparentCount=0,whiteCount=0,totalVisible=0;
-    for(let i=0;i<pixels.length;i+=4){const r=pixels[i],g=pixels[i+1],b=pixels[i+2],a=pixels[i+3];if(a<30){transparentCount++;continue;}totalVisible++;if(r>220&&g>220&&b>220)whiteCount++;}
+    let transparentCount=0;
+    for(let i=0;i<pixels.length;i+=4){if(pixels[i+3]<30)transparentCount++;}
     const transparentRatio=transparentCount/(w*h);
     const needsProcessing=transparentRatio<0.05;
     let processedPixels=Buffer.from(pixels),method="direct";
