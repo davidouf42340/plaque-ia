@@ -87,10 +87,6 @@ const rateLimiter   = rateLimit({ windowMs:5*60*1000, max:20, standardHeaders:tr
 function getBaseUrl(req) { return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`; }
 function slugify(v="") { return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"").slice(0,80); }
 
-// ─── Normalisation — adaptée à la nouvelle boutique ──────────────────────────
-// BAL : option1=Couleur ("Acier Brossé","Or Brossé"...), option2=Dimension ("100X25mm"),  option3=Epaisseur ("1.6 mm")
-// Rue : option1=Dimension, option2=Epaisseur-Fixation, option3=Couleur ("Acier brossé")
-
 function normalizeDimension(value="") {
   return String(value).trim().toLowerCase().replaceAll(" ","");
 }
@@ -103,7 +99,6 @@ function normalizeColor(value="") {
   const v = String(value).trim().toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"");
   const map = {
-    // Nouvelles valeurs BAL (avec majuscules et accents)
     "acier brosse":"acier-brosse","acier brose":"acier-brosse",
     "acier-brosse":"acier-brosse","acier":"acier-brosse",
     "or brosse":"or","or brose":"or","or":"or",
@@ -151,9 +146,6 @@ const ALLOWED_THICKNESS_BY_COLOR = {
   "noir-brillant":["1.6","3.2"],"gris":["1.6","3.2"],"noyer":["1.6","3.2"],"rose":["1.6","3.2"]
 };
 
-// ─── VARIANT_MAP BAL — nouvelle boutique ─────────────────────────────────────
-// Générés depuis products.json du 04/05/2026
-// option1=Couleur, option2=Dimension, option3=Épaisseur
 const VARIANT_MAP = {
   "100x25mm":{
     "1.6":{"acier-brosse":{variantId:53152486228331},"or":{variantId:53152486556011},"cuivre":{variantId:53152486883691},"noir":{variantId:53152487211371},"blanc":{variantId:53152487539051},"noir-brillant":{variantId:53152487866731},"noyer":{variantId:53152488194411},"gris":{variantId:53152488522091},"rose":{variantId:53152488849771}},
@@ -177,8 +169,6 @@ const VARIANT_MAP = {
   }
 };
 
-// ─── VARIANT_MAP RUE — nouvelle boutique ─────────────────────────────────────
-// option1=Dimension, option2=Épaisseur-Fixation, option3=Couleur
 const RUE_VARIANT_MAP = {
   "150x100mm":{
     "1.6mm - À coller":{"acier-brosse":{variantId:53152489177451},"or":{variantId:53152489210219},"cuivre":{variantId:53152489242987},"blanc":{variantId:53152489275755},"noir":{variantId:53152489308523},"gris":{variantId:53152489341291},"noyer":{variantId:53152489374059},"rose":{variantId:53152489406827}},
@@ -203,7 +193,7 @@ const RUE_VARIANT_MAP = {
   }
 };
 
-const CATEGORY_RULES=[{key:"animaux",words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou","cochon","vache","mouton","loup","renard","cerf","dauphin","baleine","crabe","homard","singe","gorille","girafe","zèbre","zebre","rhinocéros","rhinoceros","hippopotame","crocodile","alligator","grenouille","lizard","lézard","ara","perroquet","flamant","pingouin","manchot","ours","koala","kangourou","loutre","castor","écureuil","ecureuil","hérisson","herisson","armadillo","chauve-souris","chauve souris","mante","abeille","libellule","araignée","araignee","scorpion","cameleon","caméléon"]},{key:"sport",words:["football","foot","basket","basketball","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon","ski","snowboard","surf","skateboard","roller","escalade","escrime","équitation","equitation","gym","gymnaste","handball","volleyball","volley","badminton","ping pong","bowling","billard","fléchettes","flechettes","poids","barbell","dumbbell","yoga","pilates","danse","athletisme","atletisme","sprint","saut","javelot","disque","perche","lutte","mma","taekwondo","aikido","kung fu","capoeira"]},{key:"medical",words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine","pilule","médicament","medicament","ambulance","urgence","scalpel","bistouri","pince","compresse","bandage","fauteuil roulant","béquille","bequille","opticien","lunettes","cardiologie","coeur","anatomie","squelette","os","dent","thermomètre","thermometre","tension","sang","laboratoire","labo","radio","scanner","psychologue","cabinet","clinique"]},{key:"beaute",words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon","peigne","sèche-cheveux","seche cheveux","rasoir","mousse","gel","vernis","rouge à lèvres","rouge a levres","fond de teint","mascara","eyeliner","sourcils","cils","épilation","epilation","manucure","pédicure","pedicure","lash","nail","tatouage","piercing","dermatologue","crème","creme","lotion","parfum"]},{key:"restauration",words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse","assiette","verre","bouteille","bière","biere","champagne","whisky","sushi","pâtes","pates","salade","soupe","gâteau","gateau","dessert","chocolat","glace","confiserie","épicerie","epicerie","marché","marche","traiteur","snack","kebab","tacos","crêpe","crepe","gaufre","waffle","barbecue","bbq","steakhouse","rôtisserie","rotisserie","boucherie","fromagerie","bar","brasserie","taverne","auberge","hôtel","hotel","fast food","fast-food"]},{key:"batiment",words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux","peintre","peinture","menuisier","menuiserie","charpente","charpentier","couvreur","toiture","carreleur","carrelage","vitrier","serrurier","serrure","chauffagiste","climatisation","clim","isolation","façade","facade","terrassier","génie civil","genie civil","ingénieur","ingenieur","architecte","architecture","grue","bulldozer","pelleteuse","niveau","équerre","equerre","mètre","metre","ciment","béton","beton","brique","parpaing","ferrailleur","soudeur","démolition","demolition","rénovation","renovation","villa","immeuble","appartement","chantier","blueprint"]},{key:"nature",words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere","ocean","mer","vague","plage","sable","désert","desert","savane","jungle","tropique","palmier","bambou","cactus","herbe","prairie","colline","vallée","vallee","volcan","glacier","cascade","lac","étang","etang","marais","champignon","mousse","lichen","pin","chêne","chene","bouleau","sapin","cerisier","lavande","tournesol","coquelicot","marguerite","tulipe","orchidée","orchidee","lotus","algue","corail","nid","ruche","météore","meteor","arc-en-ciel","aurore","neige","glace","vent","tempête","tempete"]},{key:"symboles",words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason","bouclier","épée","epee","ancre","boussole","globe","monde","paix","infini","yin yang","trèfle","trefle","fer à cheval","fer a cheval","dreamcatcher","mandala","caducée","caducee","balance","justice","phare","clef","clé","cle","cadenas","ruban","nœud","noeud","aile","plume","main","poing","œil","oeil","pyramide","triangle","hexagone","cercle","spiral","galaxie","cosmos","atome","molécule","molecule","dna","adn","robot","intelligence artificielle","ia","wifi","numérique","numerique"]}];
+const CATEGORY_RULES=[{key:"animaux",words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou","cochon","vache","mouton","loup","renard","cerf","dauphin","baleine","crabe","homard","singe","gorille","girafe","zèbre","zebre","rhinocéros","rhinoceros","hippopotame","crocodile","alligator","grenouille","lizard","lézard","ara","perroquet","flamant","pingouin","manchot","ours","koala","kangourou","loutre","castor","écureuil","ecureuil","hérisson","herisson","armadillo","chauve-souris","chauve souris","mante","abeille","libellule","araignée","araignee","scorpion","cameleon","caméléon","colibri","cygne","hirondelle","gecko","poney","veau","chevre","canard","oie","mouton","belier","taureau","tigre"]},{key:"sport",words:["football","foot","basket","basketball","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon","ski","snowboard","surf","skateboard","roller","escalade","escrime","équitation","equitation","gym","gymnaste","handball","volleyball","volley","badminton","ping pong","bowling","billard","fléchettes","flechettes","poids","barbell","dumbbell","yoga","pilates","danse","athletisme","atletisme","sprint","saut","javelot","disque","perche","lutte","mma","taekwondo","aikido","kung fu","capoeira","piston","retrogaming"]},{key:"medical",words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine","pilule","médicament","medicament","ambulance","urgence","scalpel","bistouri","pince","compresse","bandage","fauteuil roulant","béquille","bequille","opticien","lunettes","cardiologie","coeur","anatomie","squelette","os","dent","thermomètre","thermometre","tension","sang","laboratoire","labo","radio","scanner","psychologue","cabinet","clinique"]},{key:"beaute",words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon","peigne","sèche-cheveux","seche cheveux","rasoir","mousse","gel","vernis","rouge à lèvres","rouge a levres","fond de teint","mascara","eyeliner","sourcils","cils","épilation","epilation","manucure","pédicure","pedicure","lash","nail","tatouage","piercing","dermatologue","crème","creme","lotion","parfum"]},{key:"restauration",words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse","assiette","verre","bouteille","bière","biere","champagne","whisky","sushi","pâtes","pates","salade","soupe","gâteau","gateau","dessert","chocolat","glace","confiserie","épicerie","epicerie","marché","marche","traiteur","snack","kebab","tacos","crêpe","crepe","gaufre","waffle","barbecue","bbq","steakhouse","rôtisserie","rotisserie","boucherie","fromagerie","bar","brasserie","taverne","auberge","hôtel","hotel","fast food","fast-food"]},{key:"batiment",words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux","peintre","peinture","menuisier","menuiserie","charpente","charpentier","couvreur","toiture","carreleur","carrelage","vitrier","serrurier","serrure","chauffagiste","climatisation","clim","isolation","façade","facade","terrassier","génie civil","genie civil","ingénieur","ingenieur","architecte","architecture","grue","bulldozer","pelleteuse","niveau","équerre","equerre","mètre","metre","ciment","béton","beton","brique","parpaing","ferrailleur","soudeur","démolition","demolition","rénovation","renovation","villa","immeuble","appartement","chantier","blueprint","chateau"]},{key:"nature",words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere","ocean","mer","vague","plage","sable","désert","desert","savane","jungle","tropique","palmier","bambou","cactus","herbe","prairie","colline","vallée","vallee","volcan","glacier","cascade","lac","étang","etang","marais","champignon","mousse","lichen","pin","chêne","chene","bouleau","sapin","cerisier","lavande","tournesol","coquelicot","marguerite","tulipe","orchidée","orchidee","lotus","algue","corail","nid","ruche","météore","meteor","arc-en-ciel","aurore","neige","glace","vent","tempête","tempete"]},{key:"symboles",words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason","bouclier","épée","epee","ancre","boussole","globe","monde","paix","infini","yin yang","trèfle","trefle","fer à cheval","fer a cheval","dreamcatcher","mandala","caducée","caducee","balance","justice","phare","clef","clé","cle","cadenas","ruban","nœud","noeud","aile","plume","main","poing","œil","oeil","pyramide","triangle","hexagone","cercle","spiral","galaxie","cosmos","atome","molécule","molecule","dna","adn","robot","intelligence artificielle","ia","wifi","numérique","numerique","cancer","capricorne","gemeaux","sagitaire","verseau","vierge","vikings","corse","france","italie","portugal","stoppub","btc","bitcoin","casque audio","catwoman","woody","dolly"]}];
 
 function detectCategory(prompt="") {
   const p=String(prompt||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
@@ -478,7 +468,6 @@ app.post("/api/gallery/recategorize", checkAdminToken, async(req,res)=>{
   }catch(e){console.error("Erreur recategorize:",e.message);res.status(500).json({error:e.message});}
 });
 
-// ── Suppression galerie IA ────────────────────────────────────────────────────
 app.post("/api/gallery/delete", checkAdminToken, async(req,res)=>{
   try{
     const{id}=req.body||{};
@@ -487,6 +476,39 @@ app.post("/api/gallery/delete", checkAdminToken, async(req,res)=>{
     if(error)throw error;
     res.json({ok:true});
   }catch(e){console.error("Delete gallery error:",e.message);res.status(500).json({error:e.message});}
+});
+
+// ── Import batch icônes galerie ───────────────────────────────────────────────
+app.post("/api/gallery/import-batch", checkAdminToken, async(req,res)=>{
+  try{
+    const{items}=req.body||{};
+    if(!Array.isArray(items)||!items.length)
+      return res.status(400).json({error:"items[] requis"});
+    const results={success:0,errors:[]};
+    const createdAt=new Date().toISOString();
+    for(const item of items){
+      const url=(item.url||"").trim();
+      const prompt=(item.prompt||"").trim();
+      const category=detectCategory(prompt)!=="divers"?detectCategory(prompt):(item.category||"divers");
+      if(!url){results.errors.push({item,error:"url manquante"});continue;}
+      const entry={
+        id:`import-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+        group_id:`batch-import-${Date.now()}`,
+        created_at:createdAt,
+        prompt:prompt||item.name||"icône",
+        category,
+        in_gallery:true,
+        image_url:url,
+        local_url:null,
+        shopify_url:url,
+        shopify_file_id:null
+      };
+      const{error}=await supabase.from("gallery_items").insert(entry);
+      if(error){results.errors.push({item,error:error.message});}
+      else{results.success++;}
+    }
+    res.json({ok:true,success:results.success,errors:results.errors.length,detail:results.errors});
+  }catch(e){console.error("import-batch error:",e.message);res.status(500).json({error:e.message});}
 });
 
 app.post("/api/realized/save", checkOrigin, uploadLimiter, async(req,res)=>{
