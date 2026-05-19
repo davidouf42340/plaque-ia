@@ -285,11 +285,17 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     const imageCount=Math.max(1,Math.min(Number(count)||3,3));
     if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
     const baseUrl=getBaseUrl(req);
-const subjectPrompt = `${cleanPrompt}, premium black vector line-art emblem, laser-ready custom decal, semi-detailed premium style`;
+const subjectPrompt = `${cleanPrompt}, premium black vector line-art illustration, laser-ready square composition, semi-detailed premium style`;
 
 const finalPrompt = [
-  "Create a black laser-ready illustrated logo on a fully transparent background.",
-  "Style: premium vector emblem, custom decal artwork, semi-detailed line-art illustration.",
+  "Create a black laser-ready illustrated design on a fully transparent background.",
+  "Style: premium vector line-art illustration, laser-ready custom artwork, square composition.",
+  "Use a full square composition, not a circular badge composition.",
+  "Fill the square canvas naturally while keeping small safe margins.",
+  "Do not arrange the subject inside an invisible circle.",
+  "No round emblem, no circular layout, no medallion composition.",
+  "Use the available square engraving area efficiently.",
+
   "The image must feel decorative, professional and high quality.",
   "The design must be more detailed than a basic icon, but still simplified for laser engraving.",
   "Use bold black outer contours and a refined medium-rich level of interior details.",
@@ -298,12 +304,15 @@ const finalPrompt = [
   "Interior details must remain large, clean, well separated and readable.",
   "Keep the overall result balanced, elegant and attractive.",
   "The result must stay readable when engraved small on a personalized plaque.",
+
   "Pure black only.",
   "No gray, no white fill, no color, no gradients.",
   "White or empty areas must be transparent.",
+
   "No photorealism, no realistic shading, no cross-hatching, no dense textures.",
   "No overly fine lines, no messy detailing, no engraving-style overload.",
   "No vintage etching, no sketch effect, no pencil effect.",
+
   "No background, no text, no frame.",
   `Subject: ${subjectPrompt}`
 ].join(" ");
