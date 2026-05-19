@@ -286,19 +286,20 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
     const baseUrl=getBaseUrl(req);
 const finalPrompt = [
-  "Create a simple black pictogram for laser engraving on a small personalized plaque.",
-  "Fully transparent background.",
-  "Style: clean vector icon, simple logo, bold readable silhouette.",
-  "Use pure black only.",
-  "No gray, no white, no colors, no gradients.",
-  "White or empty areas must be transparent.",
-  "Simplify the subject strongly while keeping it recognizable.",
-  "Keep only the essential shapes and 2 or 3 key interior details.",
-  "Use thick clean outlines and large open transparent areas.",
-  "No tiny details, no dense lines, no decorative textures.",
-  "No illustration style, no realistic drawing, no engraving artwork, no etching, no sketch.",
-  "No cross-hatching, no shading, no shadows, no background, no frame, no text.",
-  "Readable when reduced to 20 mm wide.",
+  "Create a black illustrated logo for laser engraving on a personalized plaque.",
+  "Transparent background.",
+  "Style: clean vector emblem, premium line-art logo, moderately detailed but laser-ready.",
+  "The result must be more detailed than a basic icon, but much simpler than an engraving illustration.",
+  "Use a strong readable silhouette with bold black outlines.",
+  "Add a moderate amount of meaningful interior details only.",
+  "Use approximately 6 to 12 interior lines or details, not more.",
+  "Details must be large, clean and useful for recognition.",
+  "Pure black only. No gray, no white fill, no color, no gradients.",
+  "Empty and white areas must be transparent.",
+  "No realistic shading, no cross-hatching, no texture, no sketch effect.",
+  "No many thin parallel lines, no dense linework, no tiny decorative details.",
+  "No background, no frame, no text.",
+  "Readable and attractive when engraved small on a plaque.",
   `Subject: ${cleanPrompt}`
 ].join(" ");
     const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:1});
