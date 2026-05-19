@@ -114,7 +114,20 @@ function pickGalleryIndex(prompt="",items=[]) { if(!Array.isArray(items)||!items
 
 async function saveCreationBatch({prompt,category,creations=[]}) {
   const createdAt=new Date().toISOString(),groupId=`grp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,galIdx=pickGalleryIndex(prompt,creations);
-  const entries=creations.map((entry,i)=>({id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${i+1}`,group_id:groupId,created_at:createdAt,prompt,category,in_gallery:i===galIdx,image_url:entry.imageUrl,local_url:entry.localUrl||null,shopify_url:entry.shopifyUrl||null,shopify_file_id:entry.shopifyFileId||null}));
+  const normalized = normalizePromptForCache(prompt);
+  const entries=creations.map((entry,i)=>({
+    id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${i+1}`,
+    group_id:groupId,
+    created_at:createdAt,
+    prompt,
+    prompt_normalized: entry.promptNormalized || normalized,
+    category,
+    in_gallery:i===galIdx,
+    image_url:entry.imageUrl,
+    local_url:entry.localUrl||null,
+    shopify_url:entry.shopifyUrl||null,
+    shopify_file_id:entry.shopifyFileId||null
+  }));
   const{data,error}=await supabase.from("gallery_items").insert(entries).select();
   if(error)throw new Error(`Supabase insert failed: ${error.message}`);
   return data||[];
@@ -139,6 +152,57 @@ async function getRandomGalleryItems(limit=12) {
   if(error)throw new Error("Impossible de charger la galerie aléatoire");
   return [...(data||[])].sort(()=>0.5-Math.random()).slice(0,limit);
 }
+
+// ─── Cache prompt ─────────────────────────────────────────────────────────────
+function normalizePromptForCache(prompt = "") {
+  return String(prompt)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function findCachedLogos(prompt, limit = 1) {
+  const normalized = normalizePromptForCache(prompt);
+
+  // 1. Recherche exacte sur le prompt normalisé
+  const { data: exact } = await supabase
+    .from("gallery_items")
+    .select("id, image_url, shopify_url, local_url, prompt, category")
+    .eq("prompt_normalized", normalized)
+    .limit(limit);
+
+  if (exact && exact.length >= 1) return { results: exact, matchType: "exact" };
+
+  // 2. Recherche fuzzy par mot principal
+  const words = normalized.split(" ").filter(w => w.length > 3);
+  if (!words.length) return { results: [], matchType: "none" };
+
+  const mainWord = words.sort((a, b) => b.length - a.length)[0];
+  const { data: fuzzy } = await supabase
+    .from("gallery_items")
+    .select("id, image_url, shopify_url, local_url, prompt, category")
+    .ilike("prompt", `%${mainWord}%`)
+    .limit(20);
+
+  if (!fuzzy || !fuzzy.length) return { results: [], matchType: "none" };
+
+  // Garder ceux qui contiennent au moins 50% des mots
+  const threshold = Math.ceil(words.length * 0.5);
+  const filtered = fuzzy.filter(item => {
+    const p = normalizePromptForCache(item.prompt || "");
+    const matches = words.filter(w => p.includes(w)).length;
+    return matches >= threshold;
+  });
+
+  return {
+    results: filtered.slice(0, limit),
+    matchType: filtered.length ? "fuzzy" : "none"
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse":["1.6","3.2"],"or":["1.6","3.2"],"cuivre":["1.6","3.2"],
@@ -296,45 +360,114 @@ app.get("/api/fonts/debug",(req,res)=>{
 // ── Génération IA ─────────────────────────────────────────────────────────────
 app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)=>{
   try {
-    const{prompt,count=3}=req.body||{};
-    const cleanPrompt=String(prompt||"").trim();
-    const imageCount=Math.max(1,Math.min(Number(count)||3,3));
-    if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
-    const baseUrl=getBaseUrl(req);
-    const finalPrompt=[
-      "Black ink illustration on fully transparent background.",
-      "Style: clean vector icon with bold outlines and simple internal details.",
-      "Strong black contour lines, 2-3 key internal details only (eye, main features).",
-      "NO hatching, NO cross-hatching, NO fine textures, NO shading.",
-      "Simple enough for laser engraving on metal — bold and readable at small size.",
-      "NOT a flat silhouette — show main recognizable features with thick clean lines.",
-      "No color, no shadow, no background, no text, no frame.",
+    const { prompt, count = 1, forceNew = false } = req.body || {};
+    const cleanPrompt = String(prompt || "").trim();
+    // count plafonné à 1 par défaut, 3 max — utiliser forceNew:true + count:1 côté front pour "Autre suggestion"
+    const imageCount = Math.max(1, Math.min(Number(count) || 1, 3));
+    if (!cleanPrompt) return res.status(400).json({ code: "MISSING_PROMPT", error: "Prompt image manquant." });
+
+    const baseUrl = getBaseUrl(req);
+    const category = detectCategory(cleanPrompt);
+
+    // ── Cache check ──────────────────────────────────────────────────────────
+    if (!forceNew) {
+      try {
+        const { results: cached, matchType } = await findCachedLogos(cleanPrompt, imageCount);
+        if (cached.length >= 1) {
+          console.log(`Cache hit (${matchType}) pour : "${cleanPrompt}" → ${cached.length} résultat(s)`);
+          return res.json({
+            logos: cached.map(item => ({
+              id:         item.id,
+              url:        item.shopify_url || item.image_url,
+              localUrl:   item.local_url   || null,
+              shopifyUrl: item.shopify_url || null,
+              category:   item.category    || category,
+              fromCache:  true,
+              matchType,
+            })),
+            fromCache: true,
+            matchType,
+          });
+        }
+      } catch (cacheErr) {
+        // En cas d'erreur cache, on continue vers la génération
+        console.warn("Cache lookup failed, falling through to generation:", cacheErr.message);
+      }
+    }
+
+    // ── Génération OpenAI ────────────────────────────────────────────────────
+    const finalPrompt = [
+      "High-contrast engraving-style illustration, black ink, transparent background.",
+      "Bold outlines with expressive interior linework.",
+      "Stippling, hatching and fine details welcome.",
+      "Clear silhouette, strong visual identity.",
+      "Think vintage woodcut or linocut aesthetic.",
+      "Crisp, readable at any size. No gray, no color, no background, no text.",
       `Subject: ${cleanPrompt}`
     ].join(" ");
-    const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:imageCount});
-    const logos=[],creationsToSave=[];
-    const category=detectCategory(cleanPrompt);
-    for(let i=0;i<(result.data||[]).length;i++){
-      const item=result.data[i];
-      if(!item.b64_json)continue;
-      const fileBase=`${Date.now()}-${slugify(cleanPrompt)}-${i+1}`,fileName=`${fileBase}.png`;
-      const buffer=Buffer.from(item.b64_json,"base64");
-      fs.writeFileSync(path.join(logosDir,fileName),buffer);
-      let shopifyUrl=null,shopifyFileId=null;
-      try{const u=await uploadImageToShopify(buffer,fileName,`Logo IA: ${cleanPrompt}`);shopifyUrl=u.url;shopifyFileId=u.id;}catch(e){console.error("Shopify upload failed:",e.message);}
-      const localUrl=`${baseUrl}/generated/logos/${fileName}`,finalUrl=shopifyUrl||localUrl;
-      creationsToSave.push({fileBase,imageUrl:finalUrl,localUrl,shopifyUrl,shopifyFileId});
-      logos.push({id:fileBase,url:finalUrl,localUrl,shopifyUrl,shopifyFileId,category});
+
+    const result = await openai.images.generate({
+      model:         "gpt-image-1",
+      prompt:        finalPrompt,
+      size:          "512x512",       // réduit vs 1024x1024 → ~4× moins cher
+      background:    "transparent",
+      output_format: "png",
+      quality:       "medium",
+      n:             imageCount,      // 1 par défaut
+    });
+
+    const logos = [], creationsToSave = [];
+    const normalized = normalizePromptForCache(cleanPrompt);
+
+    for (let i = 0; i < (result.data || []).length; i++) {
+      const item = result.data[i];
+      if (!item.b64_json) continue;
+
+      const fileBase = `${Date.now()}-${slugify(cleanPrompt)}-${i + 1}`;
+      const fileName = `${fileBase}.png`;
+      const buffer   = Buffer.from(item.b64_json, "base64");
+
+      fs.writeFileSync(path.join(logosDir, fileName), buffer);
+
+      let shopifyUrl = null, shopifyFileId = null;
+      try {
+        const u = await uploadImageToShopify(buffer, fileName, `Logo IA: ${cleanPrompt}`);
+        shopifyUrl    = u.url;
+        shopifyFileId = u.id;
+      } catch (e) { console.error("Shopify upload failed:", e.message); }
+
+      const localUrl = `${baseUrl}/generated/logos/${fileName}`;
+      const finalUrl = shopifyUrl || localUrl;
+
+      creationsToSave.push({
+        fileBase,
+        imageUrl:        finalUrl,
+        localUrl,
+        shopifyUrl,
+        shopifyFileId,
+        promptNormalized: normalized,
+      });
+
+      logos.push({ id: fileBase, url: finalUrl, localUrl, shopifyUrl, shopifyFileId, category, fromCache: false });
     }
-    if(creationsToSave.length)await saveCreationBatch({prompt:cleanPrompt,category,creations:creationsToSave});
-    return res.json({logos});
+
+    if (creationsToSave.length) {
+      await saveCreationBatch({ prompt: cleanPrompt, category, creations: creationsToSave });
+    }
+
+    return res.json({ logos, fromCache: false });
+
   } catch(error) {
-    console.error("Erreur /api/logos/search-or-generate :",error);
-    const raw=String(error?.message||"").toLowerCase(),status=Number(error?.status||500);
-    if(status===429||raw.includes("rate limit")||raw.includes("too many"))return res.status(429).json({code:"RATE_LIMIT",error:"La génération est momentanément très sollicitée. Merci de réessayer dans quelques secondes."});
-    if(raw.includes("quota")||raw.includes("billing")||raw.includes("insufficient")||raw.includes("credit"))return res.status(503).json({code:"BILLING_UNAVAILABLE",error:"Le service de génération est momentanément indisponible."});
-    if(raw.includes("api key")||raw.includes("unauthorized")||status===401)return res.status(503).json({code:"AUTH_ERROR",error:"Le service de génération est momentanément indisponible."});
-    return res.status(500).json({code:"GENERIC_GENERATION_ERROR",error:"Une erreur est survenue. Merci de réessayer."});
+    console.error("Erreur /api/logos/search-or-generate :", error);
+    const raw    = String(error?.message || "").toLowerCase();
+    const status = Number(error?.status  || 500);
+    if (status === 429 || raw.includes("rate limit") || raw.includes("too many"))
+      return res.status(429).json({ code: "RATE_LIMIT", error: "La génération est momentanément très sollicitée. Merci de réessayer dans quelques secondes." });
+    if (raw.includes("quota") || raw.includes("billing") || raw.includes("insufficient") || raw.includes("credit"))
+      return res.status(503).json({ code: "BILLING_UNAVAILABLE", error: "Le service de génération est momentanément indisponible." });
+    if (raw.includes("api key") || raw.includes("unauthorized") || status === 401)
+      return res.status(503).json({ code: "AUTH_ERROR", error: "Le service de génération est momentanément indisponible." });
+    return res.status(500).json({ code: "GENERIC_GENERATION_ERROR", error: "Une erreur est survenue. Merci de réessayer." });
   }
 });
 
@@ -496,6 +629,7 @@ app.post("/api/gallery/import-batch", checkAdminToken, async(req,res)=>{
         group_id:`batch-import-${Date.now()}`,
         created_at:createdAt,
         prompt:prompt||item.name||"icône",
+        prompt_normalized: normalizePromptForCache(prompt||item.name||"icone"),
         category,
         in_gallery:true,
         image_url:url,
