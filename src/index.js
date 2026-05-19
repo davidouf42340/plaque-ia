@@ -79,9 +79,10 @@ function checkAdminToken(req, res, next) {
   next();
 }
 
-const aiLimiter     = rateLimit({ windowMs:10*60*1000, max:50, standardHeaders:true, legacyHeaders:false, message:{code:"RATE_LIMIT",error:"Trop de générations. Réessayez dans quelques minutes."} });
+const aiLimiter     = rateLimit({ windowMs:10*60*1000, max:10, standardHeaders:true, legacyHeaders:false, message:{code:"RATE_LIMIT",error:"Trop de générations. Réessayez dans quelques minutes."} });
 const uploadLimiter = rateLimit({ windowMs:60*1000, max:30, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de requêtes. Réessayez dans un moment."} });
-const rateLimiter   = rateLimit({ windowMs:5*60*1000, max:100, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de votes. Réessayez dans quelques minutes."} });
+const rateLimiter   = rateLimit({ windowMs:5*60*1000, max:20, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de votes. Réessayez dans quelques minutes."} });
+// ─────────────────────────────────────────────────────────────────────────────
 
 function getBaseUrl(req) { return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`; }
 function slugify(v="") { return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"").slice(0,80); }
@@ -145,13 +146,7 @@ const ALLOWED_THICKNESS_BY_COLOR = {
   "noir-brillant":["1.6","3.2"],"gris":["1.6","3.2"],"noyer":["1.6","3.2"],"rose":["1.6","3.2"]
 };
 
-// ─── VARIANT_MAP BAL ──────────────────────────────────────────────────────────
 const VARIANT_MAP = {
-  // ── Nouveau : Interphone / Sonnette 60×15 mm ──
-  "60x15mm":{
-    "1.6":{"acier-brosse":{variantId:53152486228331},"or":{variantId:53152486556011},"cuivre":{variantId:53152486883691},"noir":{variantId:53152487211371},"blanc":{variantId:53152487539051},"noir-brillant":{variantId:53152487866731},"noyer":{variantId:53152488194411},"gris":{variantId:53152488522091},"rose":{variantId:53152488849771}},
-    "3.2":{"acier-brosse":{variantId:53152486261099},"or":{variantId:53152486588779},"cuivre":{variantId:53152486916459},"noir":{variantId:53152487244139},"blanc":{variantId:53152487571819},"noir-brillant":{variantId:53152487899499},"noyer":{variantId:53152488227179},"gris":{variantId:53152488554859},"rose":{variantId:53152488882539}}
-  },
   "100x25mm":{
     "1.6":{"acier-brosse":{variantId:53152486228331},"or":{variantId:53152486556011},"cuivre":{variantId:53152486883691},"noir":{variantId:53152487211371},"blanc":{variantId:53152487539051},"noir-brillant":{variantId:53152487866731},"noyer":{variantId:53152488194411},"gris":{variantId:53152488522091},"rose":{variantId:53152488849771}},
     "3.2":{"acier-brosse":{variantId:53152486261099},"or":{variantId:53152486588779},"cuivre":{variantId:53152486916459},"noir":{variantId:53152487244139},"blanc":{variantId:53152487571819},"noir-brillant":{variantId:53152487899499},"noyer":{variantId:53152488227179},"gris":{variantId:53152488554859},"rose":{variantId:53152488882539}}
@@ -174,7 +169,6 @@ const VARIANT_MAP = {
   }
 };
 
-// ─── VARIANT_MAP RUE ──────────────────────────────────────────────────────────
 const RUE_VARIANT_MAP = {
   "150x100mm":{
     "1.6mm - À coller":{"acier-brosse":{variantId:53152489177451},"or":{variantId:53152489210219},"cuivre":{variantId:53152489242987},"blanc":{variantId:53152489275755},"noir":{variantId:53152489308523},"gris":{variantId:53152489341291},"noyer":{variantId:53152489374059},"rose":{variantId:53152489406827}},
@@ -197,41 +191,6 @@ const RUE_VARIANT_MAP = {
     "3.2mm - À coller":{"acier-brosse":{variantId:53152491372907},"or":{variantId:53152491405675},"cuivre":{variantId:53152491438443},"blanc":{variantId:53152491471211},"noir":{variantId:53152491503979}},
     "3.2mm - À fixer":{"acier-brosse":{variantId:53152491536747},"or":{variantId:53152491569515},"cuivre":{variantId:53152491602283},"blanc":{variantId:53152491635051},"noir":{variantId:53152491667819}}
   }
-};
-
-// ─── OPTIONS FIXATION ─────────────────────────────────────────────────────────
-// Perçages : +2€ sur toutes les dimensions
-// Entretoises : selon dimension
-// Kit 2 entretoises inox — variantId: 53246815011179 — 4,00€
-// Kit 4 entretoises inox — variantId: 53246815043947 — 8,00€
-
-const OPTIONS_CONFIG = {
-  // BAL
-  bal: {
-    "60x15mm":    { percage: { available: true, holes: 2, price: 2 }, entretoises: null },
-    "100x25mm":   { percage: { available: true, holes: 2, price: 2 }, entretoises: null },
-    "150x37mm":   { percage: { available: true, holes: 4, price: 2 }, entretoises: null },
-    "200x50mm":   { percage: { available: true, holes: 4, price: 2 }, entretoises: { qty: 2, price: 4, variantId: 53246815011179 } },
-    "250x87mm":   { percage: { available: true, holes: 4, price: 2 }, entretoises: { qty: 2, price: 4, variantId: 53246815011179 } },
-    "300x100mm":  { percage: { available: true, holes: 4, price: 2 }, entretoises: { qty: 4, price: 8, variantId: 53246815043947 } },
-  },
-  // Rue
-  rue: {
-    "150x100mm":  { percage: { available: true, holes: 4, price: 2 }, entretoises: { qty: 2, price: 4, variantId: 53246815011179 } },
-    "200x133mm":  { percage: { available: true, holes: 4, price: 2 }, entretoises: { qty: 2, price: 4, variantId: 53246815011179 } },
-    "250x167mm":  { percage: { available: true, holes: 4, price: 2 }, entretoises: { qty: 4, price: 8, variantId: 53246815043947 } },
-    "300x200mm":  { percage: { available: true, holes: 4, price: 2 }, entretoises: { qty: 4, price: 8, variantId: 53246815043947 } },
-  }
-};
-
-// Tarifs BAL (1.6mm de référence)
-const BAL_PRICES = {
-  "60x15mm":   9.90,
-  "100x25mm":  14.90,
-  "150x37mm":  18.90,
-  "200x50mm":  20.90,
-  "250x87mm":  22.90,
-  "300x100mm": 24.90,
 };
 
 const CATEGORY_RULES=[{key:"animaux",words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou","cochon","vache","mouton","loup","renard","cerf","dauphin","baleine","crabe","homard","singe","gorille","girafe","zèbre","zebre","rhinocéros","rhinoceros","hippopotame","crocodile","alligator","grenouille","lizard","lézard","ara","perroquet","flamant","pingouin","manchot","ours","koala","kangourou","loutre","castor","écureuil","ecureuil","hérisson","herisson","armadillo","chauve-souris","chauve souris","mante","abeille","libellule","araignée","araignee","scorpion","cameleon","caméléon","colibri","cygne","hirondelle","gecko","poney","veau","chevre","canard","oie","mouton","belier","taureau","tigre"]},{key:"sport",words:["football","foot","basket","basketball","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon","ski","snowboard","surf","skateboard","roller","escalade","escrime","équitation","equitation","gym","gymnaste","handball","volleyball","volley","badminton","ping pong","bowling","billard","fléchettes","flechettes","poids","barbell","dumbbell","yoga","pilates","danse","athletisme","atletisme","sprint","saut","javelot","disque","perche","lutte","mma","taekwondo","aikido","kung fu","capoeira","piston","retrogaming"]},{key:"medical",words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine","pilule","médicament","medicament","ambulance","urgence","scalpel","bistouri","pince","compresse","bandage","fauteuil roulant","béquille","bequille","opticien","lunettes","cardiologie","coeur","anatomie","squelette","os","dent","thermomètre","thermometre","tension","sang","laboratoire","labo","radio","scanner","psychologue","cabinet","clinique"]},{key:"beaute",words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon","peigne","sèche-cheveux","seche cheveux","rasoir","mousse","gel","vernis","rouge à lèvres","rouge a levres","fond de teint","mascara","eyeliner","sourcils","cils","épilation","epilation","manucure","pédicure","pedicure","lash","nail","tatouage","piercing","dermatologue","crème","creme","lotion","parfum"]},{key:"restauration",words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse","assiette","verre","bouteille","bière","biere","champagne","whisky","sushi","pâtes","pates","salade","soupe","gâteau","gateau","dessert","chocolat","glace","confiserie","épicerie","epicerie","marché","marche","traiteur","snack","kebab","tacos","crêpe","crepe","gaufre","waffle","barbecue","bbq","steakhouse","rôtisserie","rotisserie","boucherie","fromagerie","bar","brasserie","taverne","auberge","hôtel","hotel","fast food","fast-food"]},{key:"batiment",words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux","peintre","peinture","menuisier","menuiserie","charpente","charpentier","couvreur","toiture","carreleur","carrelage","vitrier","serrurier","serrure","chauffagiste","climatisation","clim","isolation","façade","facade","terrassier","génie civil","genie civil","ingénieur","ingenieur","architecte","architecture","grue","bulldozer","pelleteuse","niveau","équerre","equerre","mètre","metre","ciment","béton","beton","brique","parpaing","ferrailleur","soudeur","démolition","demolition","rénovation","renovation","villa","immeuble","appartement","chantier","blueprint","chateau"]},{key:"nature",words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere","ocean","mer","vague","plage","sable","désert","desert","savane","jungle","tropique","palmier","bambou","cactus","herbe","prairie","colline","vallée","vallee","volcan","glacier","cascade","lac","étang","etang","marais","champignon","mousse","lichen","pin","chêne","chene","bouleau","sapin","cerisier","lavande","tournesol","coquelicot","marguerite","tulipe","orchidée","orchidee","lotus","algue","corail","nid","ruche","météore","meteor","arc-en-ciel","aurore","neige","glace","vent","tempête","tempete"]},{key:"symboles",words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason","bouclier","épée","epee","ancre","boussole","globe","monde","paix","infini","yin yang","trèfle","trefle","fer à cheval","fer a cheval","dreamcatcher","mandala","caducée","caducee","balance","justice","phare","clef","clé","cle","cadenas","ruban","nœud","noeud","aile","plume","main","poing","œil","oeil","pyramide","triangle","hexagone","cercle","spiral","galaxie","cosmos","atome","molécule","molecule","dna","adn","robot","intelligence artificielle","ia","wifi","numérique","numerique","cancer","capricorne","gemeaux","sagitaire","verseau","vierge","vikings","corse","france","italie","portugal","stoppub","btc","bitcoin","casque audio","catwoman","woody","dolly"]}];
@@ -352,7 +311,7 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
       "No color, no shadow, no background, no text, no frame.",
       `Subject: ${cleanPrompt}`
     ].join(" ");
-    const result=await openai.images.generate({model:"gpt-image",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:imageCount});
+    const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:imageCount});
     const logos=[],creationsToSave=[];
     const category=detectCategory(cleanPrompt);
     for(let i=0;i<(result.data||[]).length;i++){
@@ -436,7 +395,7 @@ app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
       const epFix=thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
       const found=RUE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
       if(found)return res.json(found);
-      console.warn(`Variant rue introuvable: dim=${dimension} epFix=${epFix} color=${color}`);
+      console.warn(`Variant rue introuvable: dim=${dimension} epFix=${epFix} color=${color} (raw: ${rawDim}/${rawThick}/${rawColor})`);
       return res.status(404).json({error:`Variant rue introuvable: ${dimension} / ${epFix} / ${color}`});
     }
 
@@ -445,30 +404,13 @@ app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
     if(!allowed.includes(thickness))return res.status(400).json({error:`L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`});
     const found=VARIANT_MAP?.[dimension]?.[thickness]?.[color];
     if(!found){
-      console.warn(`Variant BAL introuvable: dim=${dimension} thick=${thickness} color=${color}`);
+      console.warn(`Variant BAL introuvable: dim=${dimension} thick=${thickness} color=${color} (raw: ${rawDim}/${rawThick}/${rawColor})`);
       return res.status(404).json({error:"Variant introuvable pour cette combinaison."});
     }
     return res.json(found);
   } catch(error){console.error("Erreur /api/variant/resolve :",error);return res.status(500).json({error:"Erreur interne variant."});}
 });
 
-// ── Options fixation (perçages + entretoises) ─────────────────────────────────
-app.get("/api/options/:productType/:dimension", checkOrigin, (req,res)=>{
-  try{
-    const productType = req.params.productType; // "bal" ou "rue"
-    const dimension   = normalizeDimension(req.params.dimension);
-    const config      = OPTIONS_CONFIG?.[productType]?.[dimension];
-    if(!config) return res.status(404).json({error:`Aucune option pour ${productType}/${dimension}`});
-    res.json({ dimension, productType, ...config });
-  }catch(e){res.status(500).json({error:e.message});}
-});
-
-// ── Prix BAL ──────────────────────────────────────────────────────────────────
-app.get("/api/prices/bal", (req,res)=>{
-  res.json({ prices: BAL_PRICES });
-});
-
-// ── Galerie ───────────────────────────────────────────────────────────────────
 app.get("/api/gallery/categories",async(req,res)=>{
   try{res.json({categories:getGalleryCategories(await getAllGalleryItemsForCategories())});}
   catch(e){console.error(e);res.status(500).json({error:"gallery categories error"});}
@@ -536,6 +478,7 @@ app.post("/api/gallery/delete", checkAdminToken, async(req,res)=>{
   }catch(e){console.error("Delete gallery error:",e.message);res.status(500).json({error:e.message});}
 });
 
+// ── Import batch icônes galerie ───────────────────────────────────────────────
 app.post("/api/gallery/import-batch", checkAdminToken, async(req,res)=>{
   try{
     const{items}=req.body||{};
