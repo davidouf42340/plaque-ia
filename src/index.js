@@ -286,16 +286,16 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
     const baseUrl=getBaseUrl(req);
     const finalPrompt=[
-      "Pure black ink illustration on fully transparent background.",
-      "STRICT: only pure black (#000000) lines and shapes — absolutely NO gray, NO shading, NO gradients.",
-      "Bold engraving style with fine linework and cross-hatching for depth and texture.",
-      "Rich interior details — fur, feathers, scales, textures as appropriate.",
-      "Think vintage woodcut or linocut print — high contrast, crisp.",
-      "Every pixel is either pure black or fully transparent — nothing in between.",
-      "No color, no gray fill, no shadow, no background, no frame.",
+      "Black ink illustration on fully transparent background.",
+      "Style: clean bold outlines with moderate interior linework — between minimal icon and detailed engraving.",
+      "Strong black contours, key interior details only (3-5 main features), light cross-hatching where needed.",
+      "NO large filled black areas, NO complex shading, NO photorealistic detail.",
+      "Every stroke is pure black — NO gray, NO white fill, NO gradients.",
+      "White areas inside the subject must be transparent, not white.",
+      "Readable and impactful at small size. No background, no frame, no color.",
       `Subject: ${cleanPrompt}`
     ].join(" ");
-    const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:1});
+    const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"512x512",background:"transparent",output_format:"png",quality:"medium",n:1});
     const logos=[],creationsToSave=[];
     const category=detectCategory(cleanPrompt);
     for(let i=0;i<(result.data||[]).length;i++){
@@ -344,7 +344,7 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
       const r=pixels[o],g=pixels[o+1],b=pixels[o+2],a=pixels[o+3];
       if(a<30){pixels[o]=pixels[o+1]=pixels[o+2]=pixels[o+3]=0;continue;}
       const lum=r*0.299+g*0.587+b*0.114;
-      if(lum>180){pixels[o]=pixels[o+1]=pixels[o+2]=pixels[o+3]=0;}
+      if(lum>160){pixels[o]=pixels[o+1]=pixels[o+2]=pixels[o+3]=0;}
       else{pixels[o]=pixels[o+1]=pixels[o+2]=17;pixels[o+3]=255;}
     }
     const productionBuffer=await sharp(pixels,{raw:{width,height,channels:4}}).png().toBuffer();
