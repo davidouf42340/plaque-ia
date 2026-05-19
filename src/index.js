@@ -285,17 +285,20 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     const imageCount=Math.max(1,Math.min(Number(count)||3,3));
     if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
     const baseUrl=getBaseUrl(req);
-const subjectPrompt = `${cleanPrompt}, premium black vector line-art illustration, laser-ready square composition, semi-detailed premium style`;
+const subjectPrompt = `${cleanPrompt}, premium black vector line-art illustration, laser-ready artwork, semi-detailed premium style, isolated subject only, no frame`;
 
 const finalPrompt = [
   "Create a black laser-ready illustrated design on a fully transparent background.",
-  "Style: premium vector line-art illustration, laser-ready custom artwork, square composition.",
-  "Use a full square composition, not a circular badge composition.",
-  "Fill the square canvas naturally while keeping small safe margins.",
-  "Do not arrange the subject inside an invisible circle.",
-  "No round emblem, no circular layout, no medallion composition.",
-  "Use the available square engraving area efficiently.",
-
+  "Create the subject only, isolated on transparent background.",
+  "Style: premium vector line-art illustration, laser-ready custom artwork, semi-detailed premium illustration.",
+  
+  "Use the available canvas efficiently, but do not draw any border or enclosing shape.",
+  "The subject must not be placed inside a square, rectangle, circle, badge, medallion, stamp, panel or frame.",
+  "No geometric container around the illustration.",
+  "No outline box around the design.",
+  "No square frame, no rectangular frame, no circular frame.",
+  "No background scene, no poster layout, no sign layout.",
+  
   "The image must feel decorative, professional and high quality.",
   "The design must be more detailed than a basic icon, but still simplified for laser engraving.",
   "Use bold black outer contours and a refined medium-rich level of interior details.",
@@ -313,7 +316,7 @@ const finalPrompt = [
   "No overly fine lines, no messy detailing, no engraving-style overload.",
   "No vintage etching, no sketch effect, no pencil effect.",
 
-  "No background, no text, no frame.",
+  "No background, no text, no frame, no border, no box, no badge.",
   `Subject: ${subjectPrompt}`
 ].join(" ");
     const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:1});
