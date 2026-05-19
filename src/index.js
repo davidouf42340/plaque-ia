@@ -59,7 +59,6 @@ for (const name of fontFiles) {
   else console.warn(`Police introuvable : ${name}`);
 }
 
-// ─── Sécurité ────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "").split(",").map(o => o.trim()).filter(Boolean);
 
 function checkOrigin(req, res, next) {
@@ -79,32 +78,20 @@ function checkAdminToken(req, res, next) {
   next();
 }
 
-const aiLimiter     = rateLimit({ windowMs:10*60*1000, max:10, standardHeaders:true, legacyHeaders:false, message:{code:"RATE_LIMIT",error:"Trop de générations. Réessayez dans quelques minutes."} });
+const aiLimiter     = rateLimit({ windowMs:10*60*1000, max:50, standardHeaders:true, legacyHeaders:false, message:{code:"RATE_LIMIT",error:"Trop de générations. Réessayez dans quelques minutes."} });
 const uploadLimiter = rateLimit({ windowMs:60*1000, max:30, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de requêtes. Réessayez dans un moment."} });
-const rateLimiter   = rateLimit({ windowMs:5*60*1000, max:20, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de votes. Réessayez dans quelques minutes."} });
-// ─────────────────────────────────────────────────────────────────────────────
+const rateLimiter   = rateLimit({ windowMs:5*60*1000, max:100, standardHeaders:true, legacyHeaders:false, message:{error:"Trop de votes. Réessayez dans quelques minutes."} });
 
 function getBaseUrl(req) { return process.env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get("host")}`; }
 function slugify(v="") { return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"").slice(0,80); }
-
-function normalizeDimension(value="") {
-  return String(value).trim().toLowerCase().replaceAll(" ","");
-}
-
-function normalizeThickness(value="") {
-  return String(value).trim().toLowerCase().replace("mm","").replace(",",".").replace(" ","").trim();
-}
-
+function normalizeDimension(value="") { return String(value).trim().toLowerCase().replaceAll(" ",""); }
+function normalizeThickness(value="") { return String(value).trim().toLowerCase().replace("mm","").replace(",",".").replace(" ","").trim(); }
 function normalizeColor(value="") {
-  const v = String(value).trim().toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const v = String(value).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
   const map = {
-    "acier brosse":"acier-brosse","acier brose":"acier-brosse",
-    "acier-brosse":"acier-brosse","acier":"acier-brosse",
-    "or brosse":"or","or brose":"or","or":"or",
-    "cuivre":"cuivre","blanc":"blanc","noir":"noir",
-    "noir brillant":"noir-brillant","noir-brillant":"noir-brillant",
-    "gris":"gris","noyer":"noyer","rose":"rose"
+    "acier brosse":"acier-brosse","acier brose":"acier-brosse","acier-brosse":"acier-brosse","acier":"acier-brosse",
+    "or brosse":"or","or brose":"or","or":"or","cuivre":"cuivre","blanc":"blanc","noir":"noir",
+    "noir brillant":"noir-brillant","noir-brillant":"noir-brillant","gris":"gris","noyer":"noyer","rose":"rose"
   };
   return map[v] || v;
 }
@@ -142,8 +129,8 @@ async function getRandomGalleryItems(limit=12) {
 
 const ALLOWED_THICKNESS_BY_COLOR = {
   "acier-brosse":["1.6","3.2"],"or":["1.6","3.2"],"cuivre":["1.6","3.2"],
-  "blanc":["1.6","3.2"],"noir":["1.6","3.2"],
-  "noir-brillant":["1.6","3.2"],"gris":["1.6","3.2"],"noyer":["1.6","3.2"],"rose":["1.6","3.2"]
+  "blanc":["1.6","3.2"],"noir":["1.6","3.2"],"noir-brillant":["1.6","3.2"],
+  "gris":["1.6","3.2"],"noyer":["1.6","3.2"],"rose":["1.6","3.2"]
 };
 
 const VARIANT_MAP = {
@@ -274,8 +261,6 @@ async function uploadImageToShopify(buffer,filename,alt="") {
   return{id:ready.id,url:ready.url};
 }
 
-// ─── ROUTES ──────────────────────────────────────────────────────────────────
-
 app.get("/",       (req,res)=>res.json({ok:true,message:"Serveur configurateur plaque en ligne"}));
 app.get("/health", (req,res)=>res.json({ok:true}));
 app.get("/api/fonts",(req,res)=>res.json({fonts:fontFiles}));
@@ -293,7 +278,6 @@ app.get("/api/fonts/debug",(req,res)=>{
   catch(e){res.json({error:e.message,fontsDir});}
 });
 
-// ── Génération IA ─────────────────────────────────────────────────────────────
 app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)=>{
   try {
     const{prompt,count=3}=req.body||{};
@@ -303,15 +287,14 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     const baseUrl=getBaseUrl(req);
     const finalPrompt=[
       "Black ink illustration on fully transparent background.",
-      "Style: clean vector icon with bold outlines and simple internal details.",
-      "Strong black contour lines, 2-3 key internal details only (eye, main features).",
-      "NO hatching, NO cross-hatching, NO fine textures, NO shading.",
-      "Simple enough for laser engraving on metal — bold and readable at small size.",
-      "NOT a flat silhouette — show main recognizable features with thick clean lines.",
-      "No color, no shadow, no background, no text, no frame.",
+      "Style: detailed engraving with fine linework and cross-hatching for depth.",
+      "Bold outer contour with rich interior details — fur texture, feathers, scales as appropriate.",
+      "Think vintage botanical illustration or woodcut print aesthetic.",
+      "High contrast, crisp lines, no gray fill, no color, no background.",
+      "Detailed enough to be impressive, clean enough for laser engraving.",
       `Subject: ${cleanPrompt}`
     ].join(" ");
-    const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:imageCount});
+    const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:1});
     const logos=[],creationsToSave=[];
     const category=detectCategory(cleanPrompt);
     for(let i=0;i<(result.data||[]).length;i++){
@@ -329,16 +312,15 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     if(creationsToSave.length)await saveCreationBatch({prompt:cleanPrompt,category,creations:creationsToSave});
     return res.json({logos});
   } catch(error) {
-    console.error("Erreur /api/logos/search-or-generate :",error);
+    console.error("Erreur generation IA:", error?.message, "status:", error?.status, "code:", error?.code);
     const raw=String(error?.message||"").toLowerCase(),status=Number(error?.status||500);
     if(status===429||raw.includes("rate limit")||raw.includes("too many"))return res.status(429).json({code:"RATE_LIMIT",error:"La génération est momentanément très sollicitée. Merci de réessayer dans quelques secondes."});
     if(raw.includes("quota")||raw.includes("billing")||raw.includes("insufficient")||raw.includes("credit"))return res.status(503).json({code:"BILLING_UNAVAILABLE",error:"Le service de génération est momentanément indisponible."});
     if(raw.includes("api key")||raw.includes("unauthorized")||status===401)return res.status(503).json({code:"AUTH_ERROR",error:"Le service de génération est momentanément indisponible."});
-    return res.status(500).json({code:"GENERIC_GENERATION_ERROR",error:"Une erreur est survenue. Merci de réessayer."});
+    return res.status(500).json({code:"GENERIC_GENERATION_ERROR",error:"Une erreur est survenue. Merci de réessayer.", detail: error?.message});
   }
 });
 
-// ── Render production ─────────────────────────────────────────────────────────
 app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(req,res)=>{
   try {
     const{imageBase64,color="blanc",dimension="100x25mm",thickness="1.6",line1="",line2="",line3=""}=req.body||{};
@@ -376,44 +358,30 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
   } catch(error){console.error("Erreur /api/render/production-from-image :",error);return res.status(500).json({error:error?.message||"Erreur interne génération production."});}
 });
 
-// ── Résolution variant ────────────────────────────────────────────────────────
 app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
   try {
-    const rawColor=req.body?.color||"";
-    const rawDim=req.body?.dimension||"";
-    const rawThick=req.body?.thickness||"";
-    const fixation=req.body?.fixation||null;
-    const productHandle=req.body?.productHandle||null;
-
-    const color=normalizeColor(rawColor);
-    const dimension=normalizeDimension(rawDim);
-    const thickness=normalizeThickness(rawThick);
-
+    const rawColor=req.body?.color||"",rawDim=req.body?.dimension||"",rawThick=req.body?.thickness||"";
+    const fixation=req.body?.fixation||null,productHandle=req.body?.productHandle||null;
+    const color=normalizeColor(rawColor),dimension=normalizeDimension(rawDim),thickness=normalizeThickness(rawThick);
     if(!dimension||!thickness||!color)return res.status(400).json({error:"Dimension, épaisseur ou couleur manquante."});
-
     if(productHandle&&productHandle.includes("rue")){
       const epFix=thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
       const found=RUE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
       if(found)return res.json(found);
-      console.warn(`Variant rue introuvable: dim=${dimension} epFix=${epFix} color=${color} (raw: ${rawDim}/${rawThick}/${rawColor})`);
       return res.status(404).json({error:`Variant rue introuvable: ${dimension} / ${epFix} / ${color}`});
     }
-
     const allowed=ALLOWED_THICKNESS_BY_COLOR[color];
     if(!allowed)return res.status(404).json({error:"Couleur introuvable."});
     if(!allowed.includes(thickness))return res.status(400).json({error:`L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`});
     const found=VARIANT_MAP?.[dimension]?.[thickness]?.[color];
-    if(!found){
-      console.warn(`Variant BAL introuvable: dim=${dimension} thick=${thickness} color=${color} (raw: ${rawDim}/${rawThick}/${rawColor})`);
-      return res.status(404).json({error:"Variant introuvable pour cette combinaison."});
-    }
+    if(!found)return res.status(404).json({error:"Variant introuvable pour cette combinaison."});
     return res.json(found);
-  } catch(error){console.error("Erreur /api/variant/resolve :",error);return res.status(500).json({error:"Erreur interne variant."});}
+  } catch(error){return res.status(500).json({error:"Erreur interne variant."});}
 });
 
 app.get("/api/gallery/categories",async(req,res)=>{
   try{res.json({categories:getGalleryCategories(await getAllGalleryItemsForCategories())});}
-  catch(e){console.error(e);res.status(500).json({error:"gallery categories error"});}
+  catch(e){res.status(500).json({error:"gallery categories error"});}
 });
 
 app.get("/api/gallery",async(req,res)=>{
@@ -423,7 +391,7 @@ app.get("/api/gallery",async(req,res)=>{
     const allForCats=await getAllGalleryItemsForCategories();
     const items=itemsRaw.map(i=>({id:i.id,preview:i.image_url,prompt:i.prompt,category:i.category||"divers",imageUrl:i.image_url,shopifyUrl:i.shopify_url||null,localUrl:i.local_url||null,createdAt:i.created_at}));
     res.json({items,categories:getGalleryCategories(allForCats),activeCategory:cat||"tous"});
-  }catch(e){console.error(e);res.status(500).json({error:"gallery error"});}
+  }catch(e){res.status(500).json({error:"gallery error"});}
 });
 
 app.get("/api/gallery/random",async(req,res)=>{
@@ -432,7 +400,7 @@ app.get("/api/gallery/random",async(req,res)=>{
     const allForCats=await getAllGalleryItemsForCategories();
     const items=randomItems.map(i=>({id:i.id,preview:i.image_url,prompt:i.prompt,category:i.category||"divers",imageUrl:i.image_url,shopifyUrl:i.shopify_url||null,localUrl:i.local_url||null,createdAt:i.created_at}));
     res.json({items,categories:getGalleryCategories(allForCats),activeCategory:"tous"});
-  }catch(e){console.error(e);res.status(500).json({error:"gallery error"});}
+  }catch(e){res.status(500).json({error:"gallery error"});}
 });
 
 app.post("/api/gallery/rate", checkOrigin, rateLimiter, async(req,res)=>{
@@ -440,12 +408,12 @@ app.post("/api/gallery/rate", checkOrigin, rateLimiter, async(req,res)=>{
     const{imageUrl,stars}=req.body||{};
     if(!imageUrl||!stars||stars<1||stars>5)return res.status(400).json({error:"imageUrl et stars (1-5) requis"});
     const{error:insertError}=await supabase.from("gallery_ratings").insert({image_url:imageUrl,stars:Number(stars)});
-    if(insertError){console.error("Rate insert error:",insertError.message);return res.json({avg:Number(stars),count:1});}
+    if(insertError){return res.json({avg:Number(stars),count:1});}
     const{data,error:avgError}=await supabase.from("gallery_ratings").select("stars").eq("image_url",imageUrl);
     if(avgError||!data||!data.length)return res.json({avg:Number(stars),count:1});
     const count=data.length,avg=data.reduce((sum,r)=>sum+r.stars,0)/count;
     res.json({avg:Math.round(avg*10)/10,count});
-  }catch(e){console.error("Erreur /api/gallery/rate:",e.message);res.status(500).json({error:"rating error"});}
+  }catch(e){res.status(500).json({error:"rating error"});}
 });
 
 app.post("/api/gallery/increment-use", checkOrigin, async(req,res)=>{
@@ -453,9 +421,9 @@ app.post("/api/gallery/increment-use", checkOrigin, async(req,res)=>{
     const{imageUrl}=req.body||{};
     if(!imageUrl)return res.status(400).json({error:"imageUrl requis"});
     const{error}=await supabase.rpc("increment_gallery_use",{p_image_url:imageUrl});
-    if(error){const{error:upErr}=await supabase.from("gallery_items").update({use_count:supabase.raw("use_count + 1")}).eq("image_url",imageUrl);if(upErr)console.error("increment-use fallback error:",upErr.message);}
+    if(error){await supabase.from("gallery_items").update({use_count:supabase.raw("use_count + 1")}).eq("image_url",imageUrl);}
     res.json({ok:true});
-  }catch(e){console.error("Erreur /api/gallery/increment-use:",e.message);res.status(500).json({error:"increment error"});}
+  }catch(e){res.status(500).json({error:"increment error"});}
 });
 
 app.post("/api/gallery/recategorize", checkAdminToken, async(req,res)=>{
@@ -464,8 +432,8 @@ app.post("/api/gallery/recategorize", checkAdminToken, async(req,res)=>{
     if(error)return res.status(500).json({error:error.message});
     let updated=0;
     for(const item of data){const newCat=detectCategory(item.prompt||"");if(newCat!==item.category){await supabase.from("gallery_items").update({category:newCat}).eq("id",item.id);updated++;}}
-    res.json({ok:true,total:data.length,updated,message:`${updated} images recatégorisées sur ${data.length}`});
-  }catch(e){console.error("Erreur recategorize:",e.message);res.status(500).json({error:e.message});}
+    res.json({ok:true,total:data.length,updated});
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.post("/api/gallery/delete", checkAdminToken, async(req,res)=>{
@@ -475,40 +443,25 @@ app.post("/api/gallery/delete", checkAdminToken, async(req,res)=>{
     const{error}=await supabase.from("gallery_items").delete().eq("id",id);
     if(error)throw error;
     res.json({ok:true});
-  }catch(e){console.error("Delete gallery error:",e.message);res.status(500).json({error:e.message});}
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
-// ── Import batch icônes galerie ───────────────────────────────────────────────
 app.post("/api/gallery/import-batch", checkAdminToken, async(req,res)=>{
   try{
     const{items}=req.body||{};
-    if(!Array.isArray(items)||!items.length)
-      return res.status(400).json({error:"items[] requis"});
+    if(!Array.isArray(items)||!items.length)return res.status(400).json({error:"items[] requis"});
     const results={success:0,errors:[]};
     const createdAt=new Date().toISOString();
     for(const item of items){
-      const url=(item.url||"").trim();
-      const prompt=(item.prompt||"").trim();
+      const url=(item.url||"").trim(),prompt=(item.prompt||"").trim();
       const category=detectCategory(prompt)!=="divers"?detectCategory(prompt):(item.category||"divers");
       if(!url){results.errors.push({item,error:"url manquante"});continue;}
-      const entry={
-        id:`import-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
-        group_id:`batch-import-${Date.now()}`,
-        created_at:createdAt,
-        prompt:prompt||item.name||"icône",
-        category,
-        in_gallery:true,
-        image_url:url,
-        local_url:null,
-        shopify_url:url,
-        shopify_file_id:null
-      };
+      const entry={id:`import-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,group_id:`batch-import-${Date.now()}`,created_at:createdAt,prompt:prompt||item.name||"icône",category,in_gallery:true,image_url:url,local_url:null,shopify_url:url,shopify_file_id:null};
       const{error}=await supabase.from("gallery_items").insert(entry);
-      if(error){results.errors.push({item,error:error.message});}
-      else{results.success++;}
+      if(error){results.errors.push({item,error:error.message});}else{results.success++;}
     }
     res.json({ok:true,success:results.success,errors:results.errors.length,detail:results.errors});
-  }catch(e){console.error("import-batch error:",e.message);res.status(500).json({error:e.message});}
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.post("/api/realized/save", checkOrigin, uploadLimiter, async(req,res)=>{
@@ -529,7 +482,7 @@ app.post("/api/realized/save", checkOrigin, uploadLimiter, async(req,res)=>{
     if(leftLogoUrl||rightLogoUrl){
       (async()=>{try{await supabase.from("realized_plaques").insert({image_url:finalUrl,color:color||null,dimension:dimension||null,thickness:thickness||null,left_logo_url:leftLogoUrl||null,right_logo_url:rightLogoUrl||null,created_at:new Date().toISOString()});}catch(e){console.warn("Supabase realized error:",e.message);}})();
     }
-  }catch(e){console.error("Realized save error:",e.message);res.json({ok:false});}
+  }catch(e){res.json({ok:false});}
 });
 
 app.post("/api/upload-base64", checkOrigin, uploadLimiter, async(req,res)=>{
@@ -541,7 +494,7 @@ app.post("/api/upload-base64", checkOrigin, uploadLimiter, async(req,res)=>{
     const fname=filename||`preview-${Date.now()}.png`;
     const result=await uploadImageToShopify(buffer,fname,"Aperçu plaque");
     res.json({ok:true,url:result.url});
-  }catch(e){console.error("Erreur /api/upload-base64:",e.message);res.status(500).json({error:e.message});}
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.post("/api/logo/process", checkOrigin, uploadLimiter, async(req,res)=>{
@@ -550,7 +503,6 @@ app.post("/api/logo/process", checkOrigin, uploadLimiter, async(req,res)=>{
     if(!imageBase64)return res.status(400).json({error:"imageBase64 requis"});
     const base64Data=imageBase64.replace(/^data:image\/\w+;base64,/,"");
     const inputBuffer=Buffer.from(base64Data,"base64");
-    const meta=await sharp(inputBuffer).metadata();
     const{data,info}=await sharp(inputBuffer).ensureAlpha().raw().toBuffer({resolveWithObject:true});
     const pixels=new Uint8Array(data);
     const w=info.width,h=info.height;
@@ -570,7 +522,7 @@ app.post("/api/logo/process", checkOrigin, uploadLimiter, async(req,res)=>{
     const filename=`client-logo-${Date.now()}.png`;
     const result=await uploadImageToShopify(outputBuffer,filename,"Logo client");
     res.json({ok:true,url:result.url,method});
-  }catch(e){console.error("Erreur /api/logo/process:",e.message);res.status(500).json({error:e.message});}
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.post("/api/realized/delete", checkAdminToken, async(req,res)=>{
@@ -580,7 +532,7 @@ app.post("/api/realized/delete", checkAdminToken, async(req,res)=>{
     const{error}=await supabase.from("realized_plaques").delete().eq("id",id);
     if(error)throw error;
     res.json({ok:true});
-  }catch(e){console.error("Delete realized error:",e.message);res.status(500).json({error:e.message});}
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.get("/api/realized",async(req,res)=>{
@@ -589,7 +541,7 @@ app.get("/api/realized",async(req,res)=>{
     const{data,error}=await supabase.from("realized_plaques").select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at").order("created_at",{ascending:false}).limit(limit);
     if(error)return res.status(500).json({error:error.message});
     res.json({items:data||[]});
-  }catch(e){console.error("Erreur /api/realized:",e.message);res.status(500).json({error:e.message});}
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.listen(PORT,()=>{
