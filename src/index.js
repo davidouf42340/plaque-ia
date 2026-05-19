@@ -285,26 +285,26 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     const imageCount=Math.max(1,Math.min(Number(count)||3,3));
     if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
     const baseUrl=getBaseUrl(req);
-const subjectPrompt = `${cleanPrompt}, premium black vector line-art emblem, laser-ready custom decal, balanced detail`;
+const subjectPrompt = `${cleanPrompt}, premium black vector line-art emblem, laser-ready custom decal, semi-detailed premium style`;
 
 const finalPrompt = [
   "Create a black laser-ready illustrated logo on a fully transparent background.",
-  "Style: premium vector line-art emblem, custom decal, clean illustrated logo.",
-  "The design must be more detailed than a basic pictogram, but much simpler than a detailed engraving artwork.",
-  "Use a strong readable silhouette with bold black outer contours.",
-  "Add a balanced amount of interior details for recognition and visual quality.",
-  "Use approximately 8 to 14 meaningful interior detail lines or shapes.",
-  "Interior details must be clean, bold, well separated and easy to engrave.",
-  "Keep the subject elegant, decorative and professional, not childish, not emoji-like.",
-  "Keep the design stylized and simplified, but not overly basic.",
-  "The image must remain readable when reduced to small size on a personalized plaque.",
+  "Style: premium vector emblem, custom decal artwork, semi-detailed line-art illustration.",
+  "The image must feel decorative, professional and high quality.",
+  "The design must be more detailed than a basic icon, but still simplified for laser engraving.",
+  "Use bold black outer contours and a refined medium-rich level of interior details.",
+  "Show the essential forms, posture, movement and main visual features of the subject.",
+  "Use approximately 12 to 20 clean interior detail strokes or shapes.",
+  "Interior details must remain large, clean, well separated and readable.",
+  "Keep the overall result balanced, elegant and attractive.",
+  "The result must stay readable when engraved small on a personalized plaque.",
   "Pure black only.",
   "No gray, no white fill, no color, no gradients.",
   "White or empty areas must be transparent.",
-  "No realistic shading, no cross-hatching, no dense textures, no sketch effect.",
-  "No many thin parallel lines, no tiny decorative lines, no messy details, no excessive complexity.",
-  "No photorealism, no engraving-style overload, no vintage etching.",
-  "No background, no frame, no text.",
+  "No photorealism, no realistic shading, no cross-hatching, no dense textures.",
+  "No overly fine lines, no messy detailing, no engraving-style overload.",
+  "No vintage etching, no sketch effect, no pencil effect.",
+  "No background, no text, no frame.",
   `Subject: ${subjectPrompt}`
 ].join(" ");
     const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:1});
