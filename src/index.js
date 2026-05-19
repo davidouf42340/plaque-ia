@@ -286,12 +286,13 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
     const baseUrl=getBaseUrl(req);
     const finalPrompt=[
-      "Black ink illustration on fully transparent background.",
-      "Style: detailed engraving with fine linework and cross-hatching for depth.",
-      "Bold outer contour with rich interior details — fur texture, feathers, scales as appropriate.",
-      "Think vintage botanical illustration or woodcut print aesthetic.",
-      "High contrast, crisp lines, no gray fill, no color, no background.",
-      "Detailed enough to be impressive, clean enough for laser engraving.",
+      "Pure black ink illustration on fully transparent background.",
+      "STRICT: only pure black (#000000) lines and shapes — absolutely NO gray, NO shading, NO gradients.",
+      "Bold engraving style with fine linework and cross-hatching for depth and texture.",
+      "Rich interior details — fur, feathers, scales, textures as appropriate.",
+      "Think vintage woodcut or linocut print — high contrast, crisp.",
+      "Every pixel is either pure black or fully transparent — nothing in between.",
+      "No color, no gray fill, no shadow, no background, no frame.",
       `Subject: ${cleanPrompt}`
     ].join(" ");
     const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:1});
