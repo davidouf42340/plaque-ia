@@ -379,7 +379,7 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
     let shopifyUrl=null,shopifyFileId=null;
     try{const altText=[`Plaque ${dimension}`,color,thickness+"mm",line1,line2,line3].filter(Boolean).join(" | ");const uploaded=await uploadImageToShopify(productionBuffer,fileName,altText);shopifyUrl=uploaded.url;shopifyFileId=uploaded.id;}
     catch(e){console.error("Shopify production upload failed:",e.message);}
-    return res.json({url:shopifyUrl||localUrl,shopifyUrl,shopifyFileId,localUrl});
+    return res.json({url:localUrl,shopifyUrl,shopifyFileId,localUrl});
   } catch(error){console.error("Erreur /api/render/production-from-image :",error);return res.status(500).json({error:error?.message||"Erreur interne génération production."});}
 });
 
