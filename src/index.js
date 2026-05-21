@@ -134,10 +134,6 @@ const ALLOWED_THICKNESS_BY_COLOR = {
 };
 
 const VARIANT_MAP = {
-  "60x15mm":{
-    "1.6":{"acier-brosse":{variantId:53265970790763},"or":{variantId:53265970856299},"cuivre":{variantId:53265970921835},"blanc":{variantId:53265970987371},"noir":{variantId:53265971052907},"noir-brillant":{variantId:53265971118443},"gris":{variantId:53265971183979},"noyer":{variantId:53265971249515},"rose":{variantId:53265971315051}},
-    "3.2":{"acier-brosse":{variantId:53265970823531},"or":{variantId:53265970889067},"cuivre":{variantId:53265970954603},"blanc":{variantId:53265971020139},"noir":{variantId:53265971085675},"noir-brillant":{variantId:53265971151211},"gris":{variantId:53265971216747},"noyer":{variantId:53265971282283},"rose":{variantId:53265971347819}}
-  },
   "100x25mm":{
     "1.6":{"acier-brosse":{variantId:53152486228331},"or":{variantId:53152486556011},"cuivre":{variantId:53152486883691},"noir":{variantId:53152487211371},"blanc":{variantId:53152487539051},"noir-brillant":{variantId:53152487866731},"noyer":{variantId:53152488194411},"gris":{variantId:53152488522091},"rose":{variantId:53152488849771}},
     "3.2":{"acier-brosse":{variantId:53152486261099},"or":{variantId:53152486588779},"cuivre":{variantId:53152486916459},"noir":{variantId:53152487244139},"blanc":{variantId:53152487571819},"noir-brillant":{variantId:53152487899499},"noyer":{variantId:53152488227179},"gris":{variantId:53152488554859},"rose":{variantId:53152488882539}}
