@@ -209,7 +209,7 @@ async function getShopifyAdminAccessToken() {
   const body=new URLSearchParams({grant_type:"client_credentials",client_id:clientId,client_secret:clientSecret});
   const r=await fetch(`https://${shop}/admin/oauth/access_token`,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body.toString()});
   const data=await r.json();
-  if(!r.ok||!data?.access_token)throw new Error("Impossible d'obtenir le token Admin Shopify");
+  if(!r.ok||!data?.access_token)throw new Error("Impossible d\'obtenir le token Admin Shopify");
   shopifyTokenCache.accessToken=data.access_token;
   shopifyTokenCache.expiresAt=now+((Number(data.expires_in)||86399)*1000);
   return shopifyTokenCache.accessToken;
@@ -265,41 +265,33 @@ async function uploadImageToShopify(buffer,filename,alt="") {
   return{id:ready.id,url:ready.url};
 }
 
-// ── Upload PNG vers Supabase Storage ─────────────────────────────────────────
-async function purgeOldSupabaseFiles() {
+// ── Supabase Storage — fichiers production PNG (purge auto 30j) ───────────
+async function uploadToSupabaseStorage(buffer, filename) {
   try {
     const { data, error } = await supabase.storage
       .from("production-files")
-      .list("", { limit: 1000 });
-    if (error || !data) return;
-    const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000); // 30 jours
-    const toDelete = data
-      .filter(f => new Date(f.created_at).getTime() < cutoff)
-      .map(f => f.name);
-    if (!toDelete.length) return;
-    await supabase.storage.from("production-files").remove(toDelete);
-    console.log(`Purge Supabase Storage: ${toDelete.length} fichiers supprimés`);
+      .upload(filename, buffer, { contentType: "image/png", upsert: true });
+    if (error) throw new Error(`Supabase Storage: ${error.message}`);
+    const { data: urlData } = supabase.storage.from("production-files").getPublicUrl(filename);
+    return urlData.publicUrl;
   } catch(e) {
-    console.warn("Purge Supabase Storage failed:", e.message);
+    console.warn("Supabase Storage upload failed:", e.message);
+    return null;
   }
 }
 
-// Lance la purge une fois par jour
-setInterval(purgeOldSupabaseFiles, 24 * 60 * 60 * 1000);
-
-async function uploadToSupabaseStorage(buffer, filename) {
-  const { data, error } = await supabase.storage
-    .from("production-files")
-    .upload(filename, buffer, {
-      contentType: "image/png",
-      upsert: true
-    });
-  if (error) throw new Error(`Supabase Storage upload failed: ${error.message}`);
-  const { data: urlData } = supabase.storage
-    .from("production-files")
-    .getPublicUrl(filename);
-  return urlData.publicUrl;
+async function purgeOldSupabaseFiles() {
+  try {
+    const { data, error } = await supabase.storage.from("production-files").list("", { limit: 1000 });
+    if (error || !data) return;
+    const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    const toDelete = data.filter(f => new Date(f.created_at).getTime() < cutoff).map(f => f.name);
+    if (!toDelete.length) return;
+    await supabase.storage.from("production-files").remove(toDelete);
+    console.log(`Purge Supabase Storage: ${toDelete.length} fichiers supprimés`);
+  } catch(e) { console.warn("Purge Supabase Storage failed:", e.message); }
 }
+setInterval(purgeOldSupabaseFiles, 24 * 60 * 60 * 1000);
 
 app.get("/",       (req,res)=>res.json({ok:true,message:"Serveur configurateur plaque en ligne"}));
 app.get("/health", (req,res)=>res.json({ok:true}));
@@ -325,21 +317,33 @@ app.post("/api/logos/search-or-generate", checkOrigin, aiLimiter, async(req,res)
     const imageCount=Math.max(1,Math.min(Number(count)||3,3));
     if(!cleanPrompt)return res.status(400).json({code:"MISSING_PROMPT",error:"Prompt image manquant."});
     const baseUrl=getBaseUrl(req);
+    const subjectPrompt = `${cleanPrompt}, premium black vector line-art illustration, laser-ready artwork, semi-detailed premium style, isolated subject only, no frame`;
     const finalPrompt = [
-      "Create a simple black pictogram for laser engraving on a small personalized plaque.",
-      "Fully transparent background.",
-      "Style: clean vector icon, simple logo, bold readable silhouette.",
-      "Use pure black only.",
-      "No gray, no white, no colors, no gradients.",
+      "Create a black laser-ready illustrated design on a fully transparent background.",
+      "Create the subject only, isolated on transparent background.",
+      "Style: premium vector line-art illustration, laser-ready custom artwork, semi-detailed premium illustration.",
+      "Use the available canvas efficiently, but do not draw any border or enclosing shape.",
+      "The subject must not be placed inside a square, rectangle, circle, badge, medallion, stamp, panel or frame.",
+      "No geometric container around the illustration.",
+      "No outline box around the design.",
+      "No square frame, no rectangular frame, no circular frame.",
+      "No background scene, no poster layout, no sign layout.",
+      "The image must feel decorative, professional and high quality.",
+      "The design must be more detailed than a basic icon, but still simplified for laser engraving.",
+      "Use bold black outer contours and a refined medium-rich level of interior details.",
+      "Show the essential forms, posture, movement and main visual features of the subject.",
+      "Use approximately 12 to 20 clean interior detail strokes or shapes.",
+      "Interior details must remain large, clean, well separated and readable.",
+      "Keep the overall result balanced, elegant and attractive.",
+      "The result must stay readable when engraved small on a personalized plaque.",
+      "Pure black only.",
+      "No gray, no white fill, no color, no gradients.",
       "White or empty areas must be transparent.",
-      "Simplify the subject strongly while keeping it recognizable.",
-      "Keep only the essential shapes and 2 or 3 key interior details.",
-      "Use thick clean outlines and large open transparent areas.",
-      "No tiny details, no dense lines, no decorative textures.",
-      "No illustration style, no realistic drawing, no engraving artwork, no etching, no sketch.",
-      "No cross-hatching, no shading, no shadows, no background, no frame, no text.",
-      "Readable when reduced to 20 mm wide.",
-      `Subject: ${cleanPrompt}`
+      "No photorealism, no realistic shading, no cross-hatching, no dense textures.",
+      "No overly fine lines, no messy detailing, no engraving-style overload.",
+      "No vintage etching, no sketch effect, no pencil effect.",
+      "No background, no text, no frame, no border, no box, no badge.",
+      `Subject: ${subjectPrompt}`
     ].join(" ");
     const result=await openai.images.generate({model:"gpt-image-1",prompt:finalPrompt,size:"1024x1024",background:"transparent",output_format:"png",quality:"medium",n:1});
     const logos=[],creationsToSave=[];
@@ -390,7 +394,7 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
       const r=pixels[o],g=pixels[o+1],b=pixels[o+2],a=pixels[o+3];
       if(a<30){pixels[o]=pixels[o+1]=pixels[o+2]=pixels[o+3]=0;continue;}
       const lum=r*0.299+g*0.587+b*0.114;
-      if(lum>160){pixels[o]=pixels[o+1]=pixels[o+2]=pixels[o+3]=0;}
+      if(lum>180){pixels[o]=pixels[o+1]=pixels[o+2]=pixels[o+3]=0;}
       else{pixels[o]=pixels[o+1]=pixels[o+2]=17;pixels[o+3]=255;}
     }
     const productionBuffer=await sharp(pixels,{raw:{width,height,channels:4}}).png().toBuffer();
@@ -398,14 +402,13 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
     const fileName=`${slugify(color)}-${slugify(dimension)}-${normalizeThickness(thickness)}mm-${timestamp}.png`;
     fs.writeFileSync(path.join(productionDir,fileName),productionBuffer);
     const localUrl=`${baseUrl}/generated/production/${fileName}`;
-    let supabaseUrl=null,shopifyUrl=null,shopifyFileId=null;
-    // Upload PNG vers Supabase Storage (fichier de production)
-    try{supabaseUrl=await uploadToSupabaseStorage(productionBuffer,fileName);}
-    catch(e){console.error("Supabase Storage upload failed:",e.message);}
-    // Upload aussi vers Shopify pour l'aperçu miniature
+    // Upload Supabase Storage (PNG garanti, persistant)
+    const supabaseUrl=await uploadToSupabaseStorage(productionBuffer,fileName);
+    // Upload Shopify pour aperçu miniature commande
+    let shopifyUrl=null,shopifyFileId=null;
     try{const altText=[`Plaque ${dimension}`,color,thickness+"mm",line1,line2,line3].filter(Boolean).join(" | ");const uploaded=await uploadImageToShopify(productionBuffer,fileName,altText);shopifyUrl=uploaded.url;shopifyFileId=uploaded.id;}
     catch(e){console.error("Shopify production upload failed:",e.message);}
-    // URL de sortie : Supabase (PNG garanti) en priorité
+    // URL Supabase en priorité (PNG), fallback localUrl
     return res.json({url:supabaseUrl||localUrl,shopifyUrl,shopifyFileId,localUrl,supabaseUrl});
   } catch(error){console.error("Erreur /api/render/production-from-image :",error);return res.status(500).json({error:error?.message||"Erreur interne génération production."});}
 });
@@ -424,7 +427,7 @@ app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
     }
     const allowed=ALLOWED_THICKNESS_BY_COLOR[color];
     if(!allowed)return res.status(404).json({error:"Couleur introuvable."});
-    if(!allowed.includes(thickness))return res.status(400).json({error:`L'épaisseur ${thickness} mm n'est pas disponible pour la couleur ${color}.`});
+    if(!allowed.includes(thickness))return res.status(400).json({error:`L\'épaisseur ${thickness} mm n\'est pas disponible pour la couleur ${color}.`});
     const found=VARIANT_MAP?.[dimension]?.[thickness]?.[color];
     if(!found)return res.status(404).json({error:"Variant introuvable pour cette combinaison."});
     return res.json(found);
