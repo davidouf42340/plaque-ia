@@ -186,7 +186,8 @@ async function shopifyFetch(path, method="GET", body=null) {
   if (body) opts.body = JSON.stringify(body);
   const res  = await fetch(url, opts);
   const text = await res.text();
-  if (!res.ok) { console.error(`[Shopify] ${method} ${path} → ${res.status}:`, text); }
+  if (!res.ok) { console.error(`[Shopify] ${method} ${path} → ${res.status}:`, text.slice(0, 300)); }
+  else if (path.includes("graphql")) { console.log(`[Shopify GQL] ${method} ${path} → ${res.status}:`, text.slice(0, 500)); }
   try { return JSON.parse(text); } catch { return text; }
 }
 
