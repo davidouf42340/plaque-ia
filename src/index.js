@@ -426,18 +426,16 @@ async function renderProdRUE({ dimension, color, number, streetLines, fontFamily
   const dims   = DIMENSION_MAP_RUE[dimKey] || DIMENSION_MAP_RUE["150x100mm"];
   const W = dims.w, H = dims.h;
 
-  const canvas = createCanvas(W, H);
-  const ctx    = canvas.getContext("2d");
-  ctx.clearRect(0, 0, W, H);
-
   const zoneH = Math.round(H * 0.75);
   const bandH = H - zoneH;
   const imgW  = Math.round(W * 0.50);
   const numW  = W - imgW;
 
-  // ── Logo ───────────────────────────────────────────────────────────────────
+  const composites = [];
+
+  // ── Logo via sharp (toujours noir, garanti transparent) ───────────────────
   if (logoUrl) {
-    const colBuf = await colorizeLogoBuffer(logoUrl, color);
+    const colBuf = await colorizeLogoBuffer(logoUrl, color, true); // forceBlack=true pour prod
     if (colBuf) {
       const meta   = await sharp(colBuf).metadata();
       const aspect = (meta.width||1) / (meta.height||1);
@@ -445,20 +443,26 @@ async function renderProdRUE({ dimension, color, number, streetLines, fontFamily
       let dW, dH;
       if (aspect > mW/mH) { dW = mW; dH = mW / aspect; }
       else                 { dH = mH; dW = mH * aspect; }
-      const resized = await sharp(colBuf).resize(Math.round(dW), Math.round(dH), { fit:"contain", background:{ r:0,g:0,b:0,alpha:0 } }).png().toBuffer();
-      const img     = new CanvasImage();
-      img.src       = resized;
-      const imgX    = layout === "image-left" ? 0 : numW;
-      ctx.drawImage(img, imgX + Math.round((imgW - dW) / 2), Math.round((zoneH - dH) / 2), Math.round(dW), Math.round(dH));
+      dW = Math.max(1, Math.round(dW)); dH = Math.max(1, Math.round(dH));
+      const resized = await sharp(colBuf)
+        .resize(dW, dH, { fit:"contain", background:{ r:0,g:0,b:0,alpha:0 } })
+        .png().toBuffer();
+      const imgX = (layout === "image-left" ? 0 : numW) + Math.round((imgW - dW) / 2);
+      const imgY = Math.round((zoneH - dH) / 2);
+      composites.push({ input: resized, left: Math.max(0, imgX), top: Math.max(0, imgY) });
     }
   }
 
+  // ── Texte (numéro + rue) via canvas transparent ────────────────────────────
   const fontName = fontFamily || "Baskvill";
+  const textCanvas = createCanvas(W, H);
+  const ctx = textCanvas.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
   ctx.fillStyle    = "#111111";
   ctx.textBaseline = "middle";
   ctx.textAlign    = "center";
 
-  // ── Numéro ─────────────────────────────────────────────────────────────────
+  // Numéro
   if (number) {
     const numBase = Math.round(zoneH * 0.50);
     const numSize = Math.round(numBase * ((numScale || 100) / 100));
@@ -469,22 +473,32 @@ async function renderProdRUE({ dimension, color, number, streetLines, fontFamily
     ctx.fillText(number, numX, Math.round(zoneH / 2));
   }
 
-  // ── Nom de rue ─────────────────────────────────────────────────────────────
+  // Nom de rue
   const sl = Array.isArray(streetLines) && streetLines.length ? streetLines : [];
   if (sl.length) {
-    const nLines    = sl.length;
+    const nLines     = sl.length;
     const streetBase = Math.round((bandH / (nLines + 0.4)) * 0.85);
     const streetSize = Math.round(streetBase * ((streetScale || 100) / 100));
-    ctx.font     = `bold ${streetSize}px "${fontName}", Arial, sans-serif`;
+    ctx.font = `bold ${streetSize}px "${fontName}", Arial, sans-serif`;
     const lineGap = Math.round(streetSize * 1.2);
-    const totalH  = lineGap * (nLines - 1);
-    const startY  = Math.round(zoneH + bandH / 2) - Math.round(totalH / 2);
+    const totalTH = lineGap * (nLines - 1);
+    const startY  = Math.round(zoneH + bandH / 2) - Math.round(totalTH / 2);
     sl.forEach((line, i) => {
       ctx.fillText(line.toUpperCase(), Math.round(W / 2), startY + i * lineGap);
     });
   }
 
-  return canvas.toBuffer("image/png");
+  const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+  composites.push({ input: textBuf, left: 0, top: 0 });
+
+  // ── Assembler sur fond transparent ────────────────────────────────────────
+  const base = sharp({
+    create: { width: W, height: H, channels: 4, background: { r:0, g:0, b:0, alpha:0 } }
+  }).png();
+
+  return composites.length > 0
+    ? base.composite(composites).toBuffer()
+    : base.toBuffer();
 }
 
 function calcAutoFontSizeServer(lines, textWidth, H, hasLeft, hasRight) {
