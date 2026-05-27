@@ -297,14 +297,14 @@ async function loadRemoteImage(url) {
  * Colorise un logo (PNG transparent) en noir ou blanc selon la couleur de plaque
  * Renvoie un Buffer PNG
  */
-async function colorizeLogoBuffer(logoUrl, targetColor) {
+async function colorizeLogoBuffer(logoUrl, targetColor, forceBlack=false) {
   if (!logoUrl) return null;
   try {
     const res    = await fetch(logoUrl);
     const buffer = Buffer.from(await res.arrayBuffer());
     const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const pixels = new Uint8Array(data);
-    const isWhite = WHITE_ELEMENTS.includes(targetColor);
+    const isWhite = !forceBlack && WHITE_ELEMENTS.includes(targetColor);
     const [r, g, b] = isWhite ? [245, 245, 245] : [17, 17, 17];
     for (let i = 0; i < pixels.length; i += 4) {
       if (pixels[i+3] > 30) {
@@ -347,7 +347,7 @@ async function renderProdBAL({ dimension, color, lines, fontFamily, fontSize, te
   const logoH = Math.round(H * 0.97);
 
   async function prepareLogo(logoUrl, xPos, flipped) {
-    const colBuf = await colorizeLogoBuffer(logoUrl, color);
+    const colBuf = await colorizeLogoBuffer(logoUrl, color, true); // forceBlack=true pour prod
     if (!colBuf) return;
     const meta   = await sharp(colBuf).metadata();
     const aspect = (meta.width || 1) / (meta.height || 1);
