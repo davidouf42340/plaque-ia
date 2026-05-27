@@ -502,6 +502,7 @@ app.post("/webhook/orders-paid", async (req, res) => {
   catch (e) { console.error("[PAG Webhook] Erreur parsing:", e); return; }
 
   console.log(`[PAG Webhook] Commande reçue : #${order.order_number} — ${order.email}`);
+  console.log("[PAG Debug] Line items:", JSON.stringify((order.line_items || []).map(i => ({ id: i.id, title: i.title, props: (i.properties || []).map(p => p.name) }))));
 
   // ── 3. Trouver les line items PAG ───────────────────────────────────────
   const pagItems = (order.line_items || []).filter(item =>
