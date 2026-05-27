@@ -204,10 +204,15 @@ async function uploadImageToShopify(buffer, filename, altText = "Plaque") {
       query: createQuery,
       variables: { files: [{ alt: altText, contentType: "IMAGE", originalSource: dataUrl }] }
     });
+    console.log("[PAG] fileCreate raw:", JSON.stringify(result?.data?.fileCreate));
     const errors = result?.data?.fileCreate?.userErrors;
     if (errors && errors.length > 0) console.warn("[PAG] fileCreate errors:", JSON.stringify(errors));
-    const url = result?.data?.fileCreate?.files?.[0]?.image?.url || null;
+    const files = result?.data?.fileCreate?.files || [];
+    const file = files[0];
+    // Shopify peut retourner un GenericFile ou MediaImage selon le type
+    const url = file?.image?.url || file?.url || file?.originalSource || null;
     if (url) console.log("[PAG] Upload GraphQL OK:", url.slice(0, 80));
+    else console.warn("[PAG] Upload GraphQL: pas d URL, file=", JSON.stringify(file));
     return url ? { url } : null;
   } catch (e) {
     console.warn("[PAG] uploadImageToShopify error:", e.message);
