@@ -190,12 +190,29 @@ async function shopifyFetch(path, method="GET", body=null) {
   try { return JSON.parse(text); } catch { return text; }
 }
 
-async function uploadImageToShopify(buffer, filename, altText="Plaque") {
-  const b64 = buffer.toString("base64");
-  const data = await shopifyFetch("/files.json", "POST", {
-    file: { attachment: b64, filename, content_type: "image/png", alt: altText }
-  });
-  return data?.file || null;
+async function uploadImageToShopify(buffer, filename, altText = "Plaque") {
+  try {
+    const b64 = buffer.toString("base64");
+    const dataUrl = `data:image/png;base64,${b64}`;
+    const createQuery = `mutation fileCreate($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) {
+        files { ... on MediaImage { id image { url } } }
+        userErrors { field message }
+      }
+    }`;
+    const result = await shopifyFetch("/graphql.json", "POST", {
+      query: createQuery,
+      variables: { files: [{ alt: altText, contentType: "IMAGE", originalSource: dataUrl }] }
+    });
+    const errors = result?.data?.fileCreate?.userErrors;
+    if (errors && errors.length > 0) console.warn("[PAG] fileCreate errors:", JSON.stringify(errors));
+    const url = result?.data?.fileCreate?.files?.[0]?.image?.url || null;
+    if (url) console.log("[PAG] Upload GraphQL OK:", url.slice(0, 80));
+    return url ? { url } : null;
+  } catch (e) {
+    console.warn("[PAG] uploadImageToShopify error:", e.message);
+    return null;
+  }
 }
 
 async function updateOrderNote(orderId, note) {
