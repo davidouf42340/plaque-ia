@@ -8,6 +8,7 @@ import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { createClient } from "@supabase/supabase-js";
 import { fileURLToPath } from "url";
 import rateLimit from "express-rate-limit";
+import crypto from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -15,7 +16,7 @@ const __dirname  = path.dirname(__filename);
 const REQUIRED_ENV = [
   "OPENAI_API_KEY","SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY",
   "SHOPIFY_STORE","SHOPIFY_CLIENT_ID","SHOPIFY_CLIENT_SECRET",
-  "PUBLIC_BASE_URL","ADMIN_SECRET_TOKEN"
+  "PUBLIC_BASE_URL","ADMIN_SECRET_TOKEN","SHOPIFY_ACCESS_TOKEN","SHOPIFY_WEBHOOK_SECRET"
 ];
 const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missingEnv.length) {
@@ -24,6 +25,7 @@ if (missingEnv.length) {
 }
 
 const app = express();
+app.use("/webhook", express.raw({ type: "application/json" }));
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "50mb" }));
 app.set("trust proxy", 1);
@@ -184,6 +186,26 @@ const RUE_VARIANT_MAP = {
   }
 };
 
+
+// ── DIMENSIONS canvas prod (px à 300dpi) ────────────────────────────────────
+const DIMENSION_MAP_BAL = {
+  "60x15mm":   { w:709,  h:177  },
+  "100x25mm":  { w:1181, h:295  },
+  "150x37mm":  { w:1772, h:437  },
+  "200x50mm":  { w:2362, h:591  },
+  "250x87mm":  { w:2953, h:1028 },
+  "300x100mm": { w:3543, h:1181 },
+};
+
+const DIMENSION_MAP_RUE = {
+  "150x100mm": { w:1772, h:1181 },
+  "200x133mm": { w:2362, h:1571 },
+  "250x167mm": { w:2953, h:1972 },
+  "300x200mm": { w:3543, h:2362 },
+};
+
+const WHITE_ELEMENTS_PROD = ["noir","noir-brillant","gris","noyer","rose"];
+
 const CATEGORY_RULES=[{key:"animaux",words:["chien","chat","cheval","lion","tigre","lapin","oiseau","aigle","serpent","rottweiler","berger","bouledogue","caniche","animaux","animal","panda","poisson","requin","éléphant","elephant","tortue","papillon","coq","hibou","cochon","vache","mouton","loup","renard","cerf","dauphin","baleine","crabe","homard","singe","gorille","girafe","zèbre","zebre","rhinocéros","rhinoceros","hippopotame","crocodile","alligator","grenouille","lizard","lézard","ara","perroquet","flamant","pingouin","manchot","ours","koala","kangourou","loutre","castor","écureuil","ecureuil","hérisson","herisson","armadillo","chauve-souris","chauve souris","mante","abeille","libellule","araignée","araignee","scorpion","cameleon","caméléon","colibri","cygne","hirondelle","gecko","poney","veau","chevre","canard","oie","mouton","belier","taureau","tigre"]},{key:"sport",words:["football","foot","basket","basketball","tennis","rugby","golf","haltère","haltere","musculation","fitness","vélo","velo","cyclisme","boxe","judo","karaté","karate","natation","running","course","sport","ballon","raquette","crossfit","marathon","ski","snowboard","surf","skateboard","roller","escalade","escrime","équitation","equitation","gym","gymnaste","handball","volleyball","volley","badminton","ping pong","bowling","billard","fléchettes","flechettes","poids","barbell","dumbbell","yoga","pilates","danse","athletisme","atletisme","sprint","saut","javelot","disque","perche","lutte","mma","taekwondo","aikido","kung fu","capoeira","piston","retrogaming"]},{key:"medical",words:["pharmacie","pharmacien","dentiste","dentaire","stéthoscope","stethoscope","croix médicale","croix medicale","medecin","médecin","infirmier","infirmière","infirmiere","vétérinaire","veterinaire","santé","sante","seringue","hôpital","hopital","soin","paramedical","kiné","kine","pilule","médicament","medicament","ambulance","urgence","scalpel","bistouri","pince","compresse","bandage","fauteuil roulant","béquille","bequille","opticien","lunettes","cardiologie","coeur","anatomie","squelette","os","dent","thermomètre","thermometre","tension","sang","laboratoire","labo","radio","scanner","psychologue","cabinet","clinique"]},{key:"beaute",words:["coiffeur","coiffure","ciseaux","ongle","ongles","esthétique","esthetique","maquillage","makeup","beauty","beauté","beaute","barbier","barber","massage","spa","shampoing","brosse","salon","peigne","sèche-cheveux","seche cheveux","rasoir","mousse","gel","vernis","rouge à lèvres","rouge a levres","fond de teint","mascara","eyeliner","sourcils","cils","épilation","epilation","manucure","pédicure","pedicure","lash","nail","tatouage","piercing","dermatologue","crème","creme","lotion","parfum"]},{key:"restauration",words:["pizza","burger","café","cafe","restaurant","fourchette","cuillère","cuillere","couteau","boulangerie","pâtisserie","patisserie","croissant","pain","boisson","vin","cocktail","chef","cuisine","tasse","assiette","verre","bouteille","bière","biere","champagne","whisky","sushi","pâtes","pates","salade","soupe","gâteau","gateau","dessert","chocolat","glace","confiserie","épicerie","epicerie","marché","marche","traiteur","snack","kebab","tacos","crêpe","crepe","gaufre","waffle","barbecue","bbq","steakhouse","rôtisserie","rotisserie","boucherie","fromagerie","bar","brasserie","taverne","auberge","hôtel","hotel","fast food","fast-food"]},{key:"batiment",words:["maçon","macon","bâtiment","batiment","maison","toit","marteau","clé anglaise","cle anglaise","plombier","électricien","electricien","outils","tournevis","perceuse","construction","artisan","travaux","peintre","peinture","menuisier","menuiserie","charpente","charpentier","couvreur","toiture","carreleur","carrelage","vitrier","serrurier","serrure","chauffagiste","climatisation","clim","isolation","façade","facade","terrassier","génie civil","genie civil","ingénieur","ingenieur","architecte","architecture","grue","bulldozer","pelleteuse","niveau","équerre","equerre","mètre","metre","ciment","béton","beton","brique","parpaing","ferrailleur","soudeur","démolition","demolition","rénovation","renovation","villa","immeuble","appartement","chantier","blueprint","chateau"]},{key:"nature",words:["arbre","fleur","montagne","soleil","lune","forêt","foret","feuille","nature","paysage","nuage","étoile","etoile","rose","plante","rivière","riviere","ocean","mer","vague","plage","sable","désert","desert","savane","jungle","tropique","palmier","bambou","cactus","herbe","prairie","colline","vallée","vallee","volcan","glacier","cascade","lac","étang","etang","marais","champignon","mousse","lichen","pin","chêne","chene","bouleau","sapin","cerisier","lavande","tournesol","coquelicot","marguerite","tulipe","orchidée","orchidee","lotus","algue","corail","nid","ruche","météore","meteor","arc-en-ciel","aurore","neige","glace","vent","tempête","tempete"]},{key:"symboles",words:["logo","icone","icône","minimaliste","symbole","symbol","coeur","cœur","éclair","eclair","flèche","fleche","couronne","croix","badge","blason","bouclier","épée","epee","ancre","boussole","globe","monde","paix","infini","yin yang","trèfle","trefle","fer à cheval","fer a cheval","dreamcatcher","mandala","caducée","caducee","balance","justice","phare","clef","clé","cle","cadenas","ruban","nœud","noeud","aile","plume","main","poing","œil","oeil","pyramide","triangle","hexagone","cercle","spiral","galaxie","cosmos","atome","molécule","molecule","dna","adn","robot","intelligence artificielle","ia","wifi","numérique","numerique","cancer","capricorne","gemeaux","sagitaire","verseau","vierge","vikings","corse","france","italie","portugal","stoppub","btc","bitcoin","casque audio","catwoman","woody","dolly"]}];
 
 function detectCategory(prompt="") {
@@ -243,35 +265,26 @@ async function waitForShopifyFileReady(fileId,maxAttempts=30,delayMs=2000) {
   throw new Error("Timeout Shopify");
 }
 
-async function uploadImageToShopify(buffer, filename, altText = "Plaque") {
-  try {
-    // Upload vers Supabase Storage bucket "production-files"
-    const { data, error } = await supabase.storage
-      .from("production-files")
-      .upload(filename, buffer, { contentType: "image/png", upsert: true });
-
-    if (error) throw new Error(error.message);
-
-    const { data: urlData } = supabase.storage
-      .from("production-files")
-      .getPublicUrl(filename);
-
-    const url = urlData?.publicUrl || null;
-    if (url) console.log("[PAG] ✅ Supabase upload OK:", url.slice(0, 80));
-    return url ? { url } : null;
-  } catch (e) {
-    console.warn("[PAG] Supabase upload error:", e.message, "— fallback local");
-    try {
-      const localPath = path.join(productionDir, filename);
-      fs.writeFileSync(localPath, buffer);
-      const localUrl = `${process.env.PUBLIC_BASE_URL}/generated/production/${filename}`;
-      console.warn("[PAG] Fallback local:", localUrl.slice(0, 80));
-      return { url: localUrl };
-    } catch (e2) {
-      console.error("[PAG] Fallback local échoué:", e2.message);
-      return null;
-    }
-  }
+async function uploadImageToShopify(buffer,filename,alt="") {
+  const mimeType="image/png";
+  const staged=await shopifyGraphQL(`mutation stagedUploadsCreate($input:[StagedUploadInput!]!){stagedUploadsCreate(input:$input){stagedTargets{url resourceUrl parameters{name value}}userErrors{field message}}}`,{input:[{filename,mimeType,httpMethod:"POST",resource:"FILE",fileSize:String(buffer.length)}]});
+  const sp=staged.stagedUploadsCreate;
+  if(sp.userErrors?.length)throw new Error(sp.userErrors[0].message);
+  const target=sp.stagedTargets[0];
+  const form=new FormData();
+  target.parameters.forEach(p=>form.append(p.name,p.value));
+  form.append("file",new Blob([buffer],{type:mimeType}),filename);
+  const uploadRes=await fetch(target.url,{method:"POST",body:form});
+  if(!uploadRes.ok)throw new Error(`Upload Shopify échoué: ${await uploadRes.text()}`);
+  const fc=await shopifyGraphQL(`mutation fileCreate($files:[FileCreateInput!]!){fileCreate(files:$files){files{__typename...on MediaImage{id alt fileStatus status image{url}preview{image{url}}}...on GenericFile{id alt fileStatus url preview{image{url}}}}userErrors{field message}}}`,{files:[{alt,contentType:"IMAGE",originalSource:target.resourceUrl}]});
+  const fp=fc.fileCreate;
+  if(fp.userErrors?.length)throw new Error(fp.userErrors[0].message);
+  const created=fp.files?.[0];
+  if(!created?.id)throw new Error("Fichier Shopify sans identifiant");
+  const immediateUrl=created?.image?.url||created?.preview?.image?.url||created?.url||null;
+  if(immediateUrl)return{id:created.id,url:immediateUrl};
+  const ready=await waitForShopifyFileReady(created.id);
+  return{id:ready.id,url:ready.url};
 }
 
 // ── Supabase Storage — fichiers production PNG (purge auto 30j) ───────────
@@ -606,6 +619,277 @@ app.get("/api/realized",async(req,res)=>{
     if(error)return res.status(500).json({error:error.message});
     res.json({items:data||[]});
   }catch(e){res.status(500).json({error:e.message});}
+});
+
+
+// ── Shopify REST helpers ──────────────────────────────────────────────────────
+const SHOPIFY_SHOP_HOST = (process.env.SHOPIFY_STORE || "").replace(/^https?:\/\//, "").trim();
+const SHOPIFY_ACCESS_TOKEN_DIRECT = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_API_VER = "2024-01";
+
+async function shopifyREST(path, method="GET", body=null) {
+  const url = `https://${SHOPIFY_SHOP_HOST}/admin/api/${SHOPIFY_API_VER}${path}`;
+  const opts = { method, headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN_DIRECT } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  const text = await res.text();
+  if (!res.ok) console.error(`[Shopify REST] ${method} ${path} → ${res.status}:`, text.slice(0,200));
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function updateOrderNote(orderId, note) {
+  return shopifyREST(`/orders/${orderId}.json`, "PUT", { order:{ id:orderId, note } });
+}
+
+async function setOrderMetafield(orderId, key, value) {
+  return shopifyREST(`/orders/${orderId}/metafields.json`, "POST", {
+    metafield: { namespace:"pag_production", key, value, type:"single_line_text_field" }
+  });
+}
+
+// ── Colorisation logo pour production ────────────────────────────────────────
+async function colorizeLogoBuffer(logoUrl, forceBlack=true) {
+  if (!logoUrl) return null;
+  try {
+    const res = await fetch(logoUrl);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const pixels = new Uint8Array(data);
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i+3] > 30) { pixels[i]=17; pixels[i+1]=17; pixels[i+2]=17; }
+    }
+    return sharp(Buffer.from(pixels), { raw:{ width:info.width, height:info.height, channels:4 } }).png().toBuffer();
+  } catch (e) { console.warn("[PAG] colorizeLogoBuffer error:", e.message); return null; }
+}
+
+function calcAutoFontSizeServer(lines, textWidth, H, hasLeft, hasRight) {
+  if (!lines.length) return Math.round(H * 0.25);
+  const lc = lines.length; let len = 1;
+  lines.forEach(l => { if (l.length > len) len = l.length; });
+  let base;
+  if      (lc===1) base=(hasLeft&&hasRight)?H*0.42:(hasLeft||hasRight)?H*0.48:H*0.55;
+  else if (lc===2) base=(hasLeft&&hasRight)?H*0.26:(hasLeft||hasRight)?H*0.30:H*0.36;
+  else if (lc===3) base=(hasLeft&&hasRight)?H*0.19:(hasLeft||hasRight)?H*0.22:H*0.26;
+  else             base=(hasLeft&&hasRight)?H*0.15:(hasLeft||hasRight)?H*0.17:H*0.20;
+  const ratio = len > 10 ? 10/len : 1;
+  return Math.max(Math.round(base * ratio), Math.round(H * 0.05));
+}
+
+// ── Génération fichier production BAL ────────────────────────────────────────
+async function renderProdBAL({ dimension, color, lines, fontFamily, fontSize, textAlign, leftLogoUrl, rightLogoUrl, flippedLeft, flippedRight }) {
+  const dimKey = normalizeDimension(dimension);
+  const dims   = DIMENSION_MAP_BAL[dimKey] || DIMENSION_MAP_BAL["100x25mm"];
+  const W = dims.w, H = dims.h;
+  const CLIENT_H = 190, scaleY = H / CLIENT_H;
+  const hasLeft = !!leftLogoUrl, hasRight = !!rightLogoUrl;
+  const logoZoneW = Math.round(W * 0.25);
+  let textLeft = 0, textWidth = W;
+  if (hasLeft && !hasRight)  { textLeft = logoZoneW; textWidth = W - logoZoneW; }
+  if (!hasLeft && hasRight)  { textLeft = 0;          textWidth = W - logoZoneW; }
+  if (hasLeft && hasRight)   { textLeft = logoZoneW; textWidth = W - logoZoneW * 2; }
+  const composites = [];
+  const logoH = Math.round(H * 0.97);
+
+  async function prepareLogo(logoUrl, xPos, flipped) {
+    const colBuf = await colorizeLogoBuffer(logoUrl, true);
+    if (!colBuf) return;
+    const meta = await sharp(colBuf).metadata();
+    const aspect = (meta.width||1) / (meta.height||1);
+    let drawW, drawH;
+    if (aspect > logoZoneW/logoH) { drawW=logoZoneW; drawH=Math.round(logoZoneW/aspect); }
+    else                           { drawH=logoH;     drawW=Math.round(logoH*aspect); }
+    drawW=Math.max(1,drawW); drawH=Math.max(1,drawH);
+    let resized = await sharp(colBuf).resize(drawW,drawH,{fit:"contain",background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();
+    if (flipped) resized = await sharp(resized).flop().png().toBuffer();
+    const imgX = xPos + Math.round((logoZoneW-drawW)/2);
+    const imgY = Math.round((H-drawH)/2);
+    composites.push({ input:resized, left:Math.max(0,imgX), top:Math.max(0,imgY) });
+  }
+
+  if (hasLeft)  await prepareLogo(leftLogoUrl,  0,             flippedLeft  || false);
+  if (hasRight) await prepareLogo(rightLogoUrl, W-logoZoneW,   flippedRight || false);
+
+  const filteredLines = (lines||[]).filter(l=>l.trim().length>0);
+  if (filteredLines.length) {
+    const clientFs = fontSize ? Math.round(fontSize) : calcAutoFontSizeServer(filteredLines, Math.round(textWidth/scaleY), CLIENT_H, hasLeft, hasRight);
+    const scaledFs = Math.max(Math.round(clientFs * scaleY), 8);
+    const fontName = fontFamily || "Baskvill";
+    const lineGap  = Math.round(scaledFs * 1.28);
+    const totalTH  = lineGap * filteredLines.length;
+    const startY   = Math.round((H-totalTH)/2 + scaledFs*0.82);
+    const align    = textAlign || "center";
+    const textCanvas = createCanvas(W, H);
+    const ctx = textCanvas.getContext("2d");
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle="#111111"; ctx.font=`bold ${scaledFs}px "${fontName}", Arial, sans-serif`;
+    ctx.textAlign=align; ctx.textBaseline="alphabetic";
+    let cx;
+    if      (align==="left")  cx = textLeft + Math.round(textWidth*0.05);
+    else if (align==="right") cx = textLeft + textWidth - Math.round(textWidth*0.05);
+    else                      cx = textLeft + Math.round(textWidth/2);
+    filteredLines.forEach((line,i) => { ctx.fillText(line, cx, startY+i*lineGap); });
+    const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+    composites.push({ input:textBuf, left:0, top:0 });
+  }
+
+  const base = sharp({ create:{ width:W, height:H, channels:4, background:{r:0,g:0,b:0,alpha:0} } }).png();
+  return composites.length > 0 ? base.composite(composites).toBuffer() : base.toBuffer();
+}
+
+// ── Génération fichier production RUE ────────────────────────────────────────
+async function renderProdRUE({ dimension, color, number, streetLines, fontFamily, numScale, streetScale, logoUrl, layout }) {
+  const dimKey = normalizeDimension(dimension);
+  const dims   = DIMENSION_MAP_RUE[dimKey] || DIMENSION_MAP_RUE["150x100mm"];
+  const W = dims.w, H = dims.h;
+  const zoneH = Math.round(H*0.75), bandH = H-zoneH;
+  const imgW = Math.round(W*0.50), numW = W-imgW;
+  const composites = [];
+
+  if (logoUrl) {
+    const colBuf = await colorizeLogoBuffer(logoUrl, true);
+    if (colBuf) {
+      const meta = await sharp(colBuf).metadata();
+      const aspect = (meta.width||1)/(meta.height||1);
+      const mW=imgW*0.95, mH=zoneH*0.95;
+      let dW,dH;
+      if (aspect>mW/mH) { dW=mW; dH=mW/aspect; } else { dH=mH; dW=mH*aspect; }
+      dW=Math.max(1,Math.round(dW)); dH=Math.max(1,Math.round(dH));
+      const resized = await sharp(colBuf).resize(dW,dH,{fit:"contain",background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();
+      const imgX = (layout==="image-left"?0:numW) + Math.round((imgW-dW)/2);
+      const imgY = Math.round((zoneH-dH)/2);
+      composites.push({ input:resized, left:Math.max(0,imgX), top:Math.max(0,imgY) });
+    }
+  }
+
+  const fontName = fontFamily || "Baskvill";
+  const textCanvas = createCanvas(W, H);
+  const ctx = textCanvas.getContext("2d");
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#111111"; ctx.textBaseline="middle"; ctx.textAlign="center";
+
+  if (number) {
+    const numSize = Math.round(Math.round(zoneH*0.50) * ((numScale||100)/100));
+    ctx.font = `bold ${numSize}px "${fontName}", Arial, sans-serif`;
+    const numX = layout==="image-left" ? Math.round(imgW+numW/2) : Math.round(numW/2);
+    ctx.fillText(number, numX, Math.round(zoneH/2));
+  }
+
+  const sl = Array.isArray(streetLines)&&streetLines.length ? streetLines : [];
+  if (sl.length) {
+    const nLines=sl.length;
+    const streetSize = Math.round(Math.round((bandH/(nLines+0.4))*0.85) * ((streetScale||100)/100));
+    ctx.font = `bold ${streetSize}px "${fontName}", Arial, sans-serif`;
+    const lineGap=Math.round(streetSize*1.2), totalTH=lineGap*(nLines-1);
+    const startY=Math.round(zoneH+bandH/2)-Math.round(totalTH/2);
+    sl.forEach((line,i) => { ctx.fillText(line.toUpperCase(), Math.round(W/2), startY+i*lineGap); });
+  }
+
+  const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+  composites.push({ input:textBuf, left:0, top:0 });
+
+  const base = sharp({ create:{ width:W, height:H, channels:4, background:{r:0,g:0,b:0,alpha:0} } }).png();
+  return composites.length>0 ? base.composite(composites).toBuffer() : base.toBuffer();
+}
+
+// ── WEBHOOK SHOPIFY orders/paid ───────────────────────────────────────────────
+app.post("/webhook/orders-paid", async (req, res) => {
+  const hmacHeader = req.headers["x-shopify-hmac-sha256"];
+  const secret     = process.env.SHOPIFY_WEBHOOK_SECRET;
+  const digest     = crypto.createHmac("sha256", secret).update(req.body).digest("base64");
+  if (digest !== hmacHeader) { console.warn("[PAG Webhook] Signature invalide"); return res.status(401).send("Unauthorized"); }
+
+  res.status(200).send("OK");
+
+  let order;
+  try { order = JSON.parse(req.body.toString()); }
+  catch (e) { console.error("[PAG Webhook] Erreur parsing:", e); return; }
+
+  console.log(`[PAG Webhook] Commande reçue : #${order.order_number} — ${order.email}`);
+
+  const pagItems = (order.line_items||[]).filter(item =>
+    item.properties && item.properties.some(p => p.name === "_pag_type")
+  );
+
+  if (!pagItems.length) { console.log(`[PAG Webhook] #${order.order_number} : pas de plaque PAG`); return; }
+
+  const notesParts = [], sep = "=".repeat(50);
+  const timestamp = new Date().toLocaleString("fr-FR", { timeZone:"Europe/Paris" });
+
+  for (const item of pagItems) {
+    const p = {}; item.properties.forEach(prop => { p[prop.name] = prop.value; });
+    const pagType = p["_pag_type"] || "bal";
+    const lineItemId = item.id;
+    console.log(`[PAG Webhook] Traitement item #${lineItemId} — type: ${pagType}`);
+
+    try {
+      let prodBuffer, prodFilename, previewUrl, prodUrl;
+
+      if (pagType === "bal") {
+        const lines = [p["Ligne 1"]||"",p["Ligne 2"]||"",p["Ligne 3"]||"",p["Ligne 4"]||""].filter(l=>l.trim());
+        prodBuffer = await renderProdBAL({
+          dimension:    p["Dimension"]    || "100x25mm",
+          color:        normalizeColor(p["Couleur plaque"] || "acier-brosse"),
+          lines, fontFamily: p["Police"] || "Baskvill", fontSize: null,
+          textAlign:    p["Alignement"]   || "center",
+          leftLogoUrl:  p["_logo_gauche"] || null,
+          rightLogoUrl: p["_logo_droite"] || null,
+          flippedLeft:  p["_flip_gauche"] === "true",
+          flippedRight: p["_flip_droite"] === "true",
+        });
+        prodFilename = `prod-bal-${order.order_number}-${lineItemId}.png`;
+
+      } else if (pagType === "rue") {
+        const sl = [p["Ligne 1 rue"]||"",p["Ligne 2 rue"]||"",p["Ligne 3 rue"]||""].filter(l=>l.trim());
+        prodBuffer = await renderProdRUE({
+          dimension:   p["Dimension"]       || "150x100mm",
+          color:       normalizeColor(p["Couleur"] || "acier-brosse"),
+          number:      p["Numéro"]          || "",
+          streetLines: sl.length ? sl : (p["Nom de rue"] ? [p["Nom de rue"]] : []),
+          fontFamily:  p["Police"]          || "Baskvill",
+          numScale:    Number(p["_num_scale"]    || 100),
+          streetScale: Number(p["_street_scale"] || 100),
+          logoUrl:     p["_logo_url"]       || null,
+          layout:      p["_layout"]         || "image-left",
+        });
+        prodFilename = `prod-rue-${order.order_number}-${lineItemId}.png`;
+      }
+
+      if (!prodBuffer) { console.warn(`[PAG Webhook] Buffer vide item ${lineItemId}`); continue; }
+
+      // Upload Supabase Storage
+      const uploaded = await uploadImageToShopify(prodBuffer, prodFilename, `Production #${order.order_number}`);
+      prodUrl = uploaded?.url || null;
+
+      if (prodUrl) {
+        console.log(`[PAG Webhook] ✅ Fichier prod : ${prodUrl.slice(0,80)}`);
+      } else {
+        const localPath = path.join(productionDir, prodFilename);
+        fs.writeFileSync(localPath, prodBuffer);
+        prodUrl = `${process.env.PUBLIC_BASE_URL}/generated/production/${prodFilename}`;
+        console.warn(`[PAG Webhook] Fallback local : ${prodUrl.slice(0,80)}`);
+      }
+
+      previewUrl = p["Aperçu plaque"] || p["_image"] || "";
+      await setOrderMetafield(order.id, `prod_url_${lineItemId}`, prodUrl);
+      if (previewUrl) await setOrderMetafield(order.id, `preview_url_${lineItemId}`, previewUrl);
+
+      const colorLabel = {"acier-brosse":"Acier brossé","or":"Or","cuivre":"Cuivre","blanc":"Blanc","noir":"Noir","noir-brillant":"Noir brillant","gris":"Gris","noyer":"Noyer","rose":"Rose"}[normalizeColor(p["Couleur plaque"]||p["Couleur"]||"")] || "—";
+
+      if (pagType === "bal") {
+        notesParts.push(`${sep}\nPLAQUE BAL — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Epaisseur"]||"—"} mm\nPolice     : ${p["Police"]||"—"}\nAlignement : ${p["Alignement"]||"—"}\nTexte      : ${[p["Ligne 1"],p["Ligne 2"],p["Ligne 3"],p["Ligne 4"]].filter(Boolean).join(" / ")||"—"}\nLogo G     : ${p["_logo_gauche"]||"aucun"}\nLogo D     : ${p["_logo_droite"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+      } else {
+        notesParts.push(`${sep}\nPLAQUE RUE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nRue        : ${p["Nom de rue"]||[p["Ligne 1 rue"],p["Ligne 2 rue"],p["Ligne 3 rue"]].filter(Boolean).join(" / ")||"—"}\nPolice     : ${p["Police"]||"—"}\nLogo       : ${p["_logo_url"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+      }
+
+    } catch (e) {
+      console.error(`[PAG Webhook] Erreur item ${lineItemId}:`, e.message);
+      notesParts.push(`${sep}\nERREUR génération — Item #${lineItemId}\n${e.message}\n${sep}`);
+    }
+  }
+
+  const noteFinale = `PAG — FICHIERS DE PRODUCTION\nCommande  : #${order.order_number}\nClient    : ${order.billing_address?.first_name||""} ${order.billing_address?.last_name||""} <${order.email}>\nGénéré le : ${timestamp}\n\n${notesParts.join("\n\n")}`;
+  await updateOrderNote(order.id, noteFinale);
+  console.log(`[PAG Webhook] ✅ Note écrite sur commande #${order.order_number}`);
 });
 
 app.listen(PORT,()=>{
