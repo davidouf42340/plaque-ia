@@ -193,91 +193,12 @@ async function shopifyFetch(path, method="GET", body=null) {
 
 async function uploadImageToShopify(buffer, filename, altText = "Plaque") {
   try {
-    // Étape 1 — Obtenir une URL d'upload stagée
-    const stageQuery = `mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
-      stagedUploadsCreate(input: $input) {
-        stagedTargets {
-          url
-          resourceUrl
-          parameters { name value }
-        }
-        userErrors { field message }
-      }
-    }`;
-    const staged = await shopifyFetch("/graphql.json", "POST", {
-      query: stageQuery,
-      variables: {
-        input: [{
-          filename,
-          mimeType: "image/png",
-          httpMethod: "POST",
-          resource: "FILE",
-          fileSize: String(buffer.length)
-        }]
-      }
-    });
-
-    const target = staged?.data?.stagedUploadsCreate?.stagedTargets?.[0];
-    if (!target) {
-      console.warn("[PAG] stagedUploads: pas de target, errors:", JSON.stringify(staged?.data?.stagedUploadsCreate?.userErrors));
-      return null;
-    }
-
-    // Étape 2 — Uploader vers le CDN stagé via multipart form
-    const boundary = "----PAGBoundary" + Date.now();
-    const parts = [];
-    for (const p of target.parameters) {
-      parts.push(`--${boundary}
-Content-Disposition: form-data; name="${p.name}"
-
-${p.value}`);
-    }
-    parts.push(`--${boundary}
-Content-Disposition: form-data; name="file"; filename="${filename}"
-Content-Type: image/png
-`);
-    const prefix = Buffer.from(parts.join("
-") + "
-");
-    const suffix = Buffer.from(`
---${boundary}--`);
-    const body   = Buffer.concat([prefix, buffer, suffix]);
-
-    const uploadRes = await fetch(target.url, {
-      method: "POST",
-      headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
-      body
-    });
-    if (!uploadRes.ok) {
-      const txt = await uploadRes.text();
-      console.warn("[PAG] CDN upload failed:", uploadRes.status, txt.slice(0, 200));
-      return null;
-    }
-
-    // Étape 3 — Créer le fichier Shopify depuis l'URL stagée
-    const createQuery = `mutation fileCreate($files: [FileCreateInput!]!) {
-      fileCreate(files: $files) {
-        files {
-          ... on MediaImage { id image { url } }
-          ... on GenericFile  { id url }
-        }
-        userErrors { field message }
-      }
-    }`;
-    const result = await shopifyFetch("/graphql.json", "POST", {
-      query: createQuery,
-      variables: {
-        files: [{ alt: altText, contentType: "IMAGE", originalSource: target.resourceUrl }]
-      }
-    });
-
-    const errors = result?.data?.fileCreate?.userErrors;
-    if (errors && errors.length > 0) console.warn("[PAG] fileCreate errors:", JSON.stringify(errors));
-    const file = result?.data?.fileCreate?.files?.[0];
-    const url  = file?.image?.url || file?.url || null;
-    if (url) console.log("[PAG] ✅ Upload OK:", url.slice(0, 80));
-    else     console.warn("[PAG] Upload: pas d'URL, file=", JSON.stringify(file));
-    return url ? { url } : null;
+    // Sauvegarder localement et servir via Railway (fallback fiable)
+    const localPath = path.join(productionDir, filename);
+    fs.writeFileSync(localPath, buffer);
+    const localUrl = `${process.env.PUBLIC_BASE_URL}/generated/production/${filename}`;
+    console.log("[PAG] Fichier sauvegardé localement:", localUrl.slice(0, 80));
+    return { url: localUrl };
   } catch (e) {
     console.warn("[PAG] uploadImageToShopify error:", e.message);
     return null;
