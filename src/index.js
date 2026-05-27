@@ -152,6 +152,32 @@ const VARIANT_MAP = {
   }
 };
 
+// ── VARIANT_MAP_RUE ──────────────────────────────────────────────────────────
+// Structure: dimension -> "épaisseur-fixation" -> couleur -> variantId
+const VARIANT_MAP_RUE = {
+  "150x100mm": {
+    "1.6-coller":{"acier-brosse":{variantId:53152489177451},"or":{variantId:53152489210219},"cuivre":{variantId:53152489242987},"blanc":{variantId:53152489275755},"noir":{variantId:53152489308523},"gris":{variantId:53152489341291},"noyer":{variantId:53152489374059},"rose":{variantId:53152489406827}},
+    "1.6-fixer": {"acier-brosse":{variantId:53152489439595},"or":{variantId:53152489472363},"cuivre":{variantId:53152489505131},"blanc":{variantId:53152489537899},"noir":{variantId:53152489570667}},
+    "3.2-coller":{"acier-brosse":{variantId:53152489603435},"or":{variantId:53152489636203},"cuivre":{variantId:53152489668971},"blanc":{variantId:53152489701739},"noir":{variantId:53152489734507}},
+    "3.2-fixer": {"acier-brosse":{variantId:53152489767275},"or":{variantId:53152489800043},"cuivre":{variantId:53152489832811},"blanc":{variantId:53152489865579},"noir":{variantId:53152489898347}},
+  },
+  "200x133mm": {
+    "1.6-coller":{"acier-brosse":{variantId:53152489931115},"or":{variantId:53152489963883},"cuivre":{variantId:53152489996651},"blanc":{variantId:53152490029419},"noir":{variantId:53152490062187},"gris":{variantId:53152490094955},"noyer":{variantId:53152490127723},"rose":{variantId:53152490160491}},
+    "3.2-coller":{"acier-brosse":{variantId:53152490193259},"or":{variantId:53152490226027},"cuivre":{variantId:53152490258795},"blanc":{variantId:53152490291563},"noir":{variantId:53152490324331}},
+    "3.2-fixer": {"acier-brosse":{variantId:53152490357099},"or":{variantId:53152490389867},"cuivre":{variantId:53152490422635},"blanc":{variantId:53152490455403},"noir":{variantId:53152490488171}},
+  },
+  "250x167mm": {
+    "1.6-coller":{"acier-brosse":{variantId:53152490520939},"or":{variantId:53152490553707},"cuivre":{variantId:53152490586475},"blanc":{variantId:53152490619243},"noir":{variantId:53152490652011},"gris":{variantId:53152490684779},"noyer":{variantId:53152490717547},"rose":{variantId:53152490750315}},
+    "3.2-coller":{"acier-brosse":{variantId:53152490783083},"or":{variantId:53152490815851},"cuivre":{variantId:53152490848619},"blanc":{variantId:53152490881387},"noir":{variantId:53152490914155}},
+    "3.2-fixer": {"acier-brosse":{variantId:53152490946923},"or":{variantId:53152490979691},"cuivre":{variantId:53152491012459},"blanc":{variantId:53152491045227},"noir":{variantId:53152491077995}},
+  },
+  "300x200mm": {
+    "1.6-coller":{"acier-brosse":{variantId:53152491110763},"or":{variantId:53152491143531},"cuivre":{variantId:53152491176299},"blanc":{variantId:53152491209067},"noir":{variantId:53152491241835},"gris":{variantId:53152491274603},"noyer":{variantId:53152491307371},"rose":{variantId:53152491340139}},
+    "3.2-coller":{"acier-brosse":{variantId:53152491372907},"or":{variantId:53152491405675},"cuivre":{variantId:53152491438443},"blanc":{variantId:53152491471211},"noir":{variantId:53152491503979}},
+    "3.2-fixer": {"acier-brosse":{variantId:53152491536747},"or":{variantId:53152491569515},"cuivre":{variantId:53152491602283},"blanc":{variantId:53152491635051},"noir":{variantId:53152491667819}},
+  },
+};
+
 // ── DIMENSIONS canvas (px à 300dpi) ─────────────────────────────────────────
 const DIMENSION_MAP_BAL = {
   "60x15mm":   { w:709,  h:177  },
@@ -740,16 +766,34 @@ app.use("/fonts", express.static(fontsDir));
 // ── Variant resolve ───────────────────────────────────────────────────────────
 app.post("/api/variant/resolve", checkOrigin, (req, res) => {
   try {
-    const { dimension, thickness, color } = req.body || {};
+    const { dimension, thickness, color, productHandle } = req.body || {};
     const dimKey   = normalizeDimension(dimension || "");
     const thickKey = normalizeThickness(thickness || "1.6");
     const colorKey = normalizeColor(color || "acier-brosse");
-    const dimData  = VARIANT_MAP[dimKey];
-    if (!dimData) return res.status(404).json({ error:`Dimension inconnue: ${dimKey}` });
+
+    // Choisir la bonne map selon le produit
+    const isRue = productHandle && productHandle.includes("rue");
+
+    if (isRue) {
+      // Clé composite épaisseur+fixation pour le produit RUE
+      const fixation = (req.body.fixation || "coller").includes("fixer") ? "fixer" : "coller";
+      const rueKey   = `${thickKey}-${fixation}`;
+      const dimData  = VARIANT_MAP_RUE[dimKey];
+      if (!dimData) return res.status(404).json({ error:`Dimension RUE inconnue: ${dimKey}`, available: Object.keys(VARIANT_MAP_RUE) });
+      const thickData = dimData[rueKey];
+      if (!thickData) return res.status(404).json({ error:`Épaisseur/fixation inconnue: ${rueKey}`, available: Object.keys(dimData) });
+      const variantData = thickData[colorKey];
+      if (!variantData) return res.status(404).json({ error:`Couleur inconnue: ${colorKey}`, available: Object.keys(thickData) });
+      return res.json({ variantId: variantData.variantId, dimension:dimKey, thickness:thickKey, color:colorKey });
+    }
+
+    // BAL
+    const dimData = VARIANT_MAP[dimKey];
+    if (!dimData) return res.status(404).json({ error:`Dimension inconnue: ${dimKey}`, available: Object.keys(VARIANT_MAP) });
     const thickData = dimData[thickKey];
     if (!thickData) return res.status(404).json({ error:`Épaisseur inconnue: ${thickKey}` });
     const variantData = thickData[colorKey];
-    if (!variantData) return res.status(404).json({ error:`Couleur inconnue: ${colorKey}` });
+    if (!variantData) return res.status(404).json({ error:`Couleur inconnue: ${colorKey}`, available: Object.keys(thickData) });
     res.json({ variantId: variantData.variantId, dimension:dimKey, thickness:thickKey, color:colorKey });
   } catch (e) { res.status(500).json({ error:e.message }); }
 });
