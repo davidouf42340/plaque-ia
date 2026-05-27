@@ -329,62 +329,64 @@ async function renderProdBAL({ dimension, color, lines, fontFamily, fontSize, te
   const dims   = DIMENSION_MAP_BAL[dimKey] || DIMENSION_MAP_BAL["100x25mm"];
   const W = dims.w, H = dims.h;
 
-  // Canvas transparent
-  const canvas = createCanvas(W, H);
-  const ctx    = canvas.getContext("2d");
-  ctx.clearRect(0, 0, W, H);
+  // Référence canvas client : 760×190
+  const CLIENT_H = 190;
+  const scaleY = H / CLIENT_H;
 
   const hasLeft  = !!leftLogoUrl;
   const hasRight = !!rightLogoUrl;
   const logoZoneW = Math.round(W * 0.25);
-  let textLeft  = 0, textWidth = W;
+  let textLeft = 0, textWidth = W;
   if (hasLeft && !hasRight)  { textLeft = logoZoneW;  textWidth = W - logoZoneW; }
   if (!hasLeft && hasRight)  { textLeft = 0;           textWidth = W - logoZoneW; }
   if (hasLeft && hasRight)   { textLeft = logoZoneW;  textWidth = W - logoZoneW * 2; }
 
-  // ── Logos ──────────────────────────────────────────────────────────────────
+  const composites = [];
+
+  // ── Logos via sharp (garanti transparent) ─────────────────────────────────
   const logoH = Math.round(H * 0.97);
 
-  async function drawLogo(logoUrl, xPos, flipped) {
+  async function prepareLogo(logoUrl, xPos, flipped) {
     const colBuf = await colorizeLogoBuffer(logoUrl, color);
     if (!colBuf) return;
-    // Redimensionner le logo pour tenir dans la zone
-    const meta    = await sharp(colBuf).metadata();
-    const aspect  = (meta.width||1) / (meta.height||1);
-    const drawW   = Math.round(logoH * aspect);
-    const drawH   = logoH;
-    const resized = await sharp(colBuf).resize(drawW, drawH, { fit:"contain", background:{ r:0,g:0,b:0,alpha:0 } }).png().toBuffer();
-    const img     = new CanvasImage();
-    img.src       = resized;
-    const imgX    = xPos + Math.round((logoZoneW - drawW) / 2);
-    const imgY    = Math.round((H - drawH) / 2);
-    ctx.save();
-    if (flipped) {
-      ctx.translate(xPos + logoZoneW, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(img, Math.round(logoZoneW - drawW) / 2, imgY, drawW, drawH);
-    } else {
-      ctx.drawImage(img, imgX, imgY, drawW, drawH);
-    }
-    ctx.restore();
+    const meta   = await sharp(colBuf).metadata();
+    const aspect = (meta.width || 1) / (meta.height || 1);
+    let drawW, drawH;
+    if (aspect > logoZoneW / logoH) { drawW = logoZoneW; drawH = Math.round(logoZoneW / aspect); }
+    else                             { drawH = logoH;     drawW = Math.round(logoH * aspect); }
+    drawW = Math.max(1, drawW); drawH = Math.max(1, drawH);
+    let resized = await sharp(colBuf)
+      .resize(drawW, drawH, { fit: "contain", background: { r:0, g:0, b:0, alpha:0 } })
+      .png().toBuffer();
+    if (flipped) resized = await sharp(resized).flop().png().toBuffer();
+    const imgX = xPos + Math.round((logoZoneW - drawW) / 2);
+    const imgY = Math.round((H - drawH) / 2);
+    composites.push({ input: resized, left: Math.max(0, imgX), top: Math.max(0, imgY) });
   }
 
-  if (hasLeft)  await drawLogo(leftLogoUrl,  0,          flippedLeft  || false);
-  if (hasRight) await drawLogo(rightLogoUrl, W - logoZoneW, flippedRight || false);
+  if (hasLeft)  await prepareLogo(leftLogoUrl,  0,             flippedLeft  || false);
+  if (hasRight) await prepareLogo(rightLogoUrl, W - logoZoneW, flippedRight || false);
 
-  // ── Texte ──────────────────────────────────────────────────────────────────
+  // ── Texte via canvas ───────────────────────────────────────────────────────
   const filteredLines = (lines || []).filter(l => l.trim().length > 0);
   if (filteredLines.length) {
-    // Auto fontSize si non fourni
-    const fs_val = fontSize || calcAutoFontSizeServer(filteredLines, textWidth, H, hasLeft, hasRight);
-    const scaledFs = Math.round(fs_val * (H / 190)); // scale par rapport canvas preview 190px
+    // fontSize est en px pour canvas 760×190 — on rescale proportionnellement
+    const clientFs = fontSize
+      ? Math.round(fontSize)
+      : calcAutoFontSizeServer(filteredLines, Math.round(textWidth / scaleY), CLIENT_H, hasLeft, hasRight);
+    const scaledFs = Math.max(Math.round(clientFs * scaleY), 8);
+
     const fontName = fontFamily || "Baskvill";
     const lineGap  = Math.round(scaledFs * 1.28);
-    const totalH   = lineGap * filteredLines.length;
-    const startY   = Math.round((H - totalH) / 2 + scaledFs * 0.82);
+    const totalTH  = lineGap * filteredLines.length;
+    const startY   = Math.round((H - totalTH) / 2 + scaledFs * 0.82);
     const align    = textAlign || "center";
 
-    ctx.fillStyle    = "#111111"; // Toujours noir sur transparent pour prod
+    // Canvas texte sur fond transparent
+    const textCanvas = createCanvas(W, H);
+    const ctx = textCanvas.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle    = "#111111";
     ctx.font         = `bold ${scaledFs}px "${fontName}", Arial, sans-serif`;
     ctx.textAlign    = align;
     ctx.textBaseline = "alphabetic";
@@ -397,9 +399,23 @@ async function renderProdBAL({ dimension, color, lines, fontFamily, fontSize, te
     filteredLines.forEach((line, i) => {
       ctx.fillText(line, cx, startY + i * lineGap);
     });
+
+    const textBuf = textCanvas.toBuffer("image/png");
+    // Extraire uniquement les pixels non-transparents via sharp pour garantir la transparence
+    const textComposite = await sharp(textBuf)
+      .ensureAlpha()
+      .png().toBuffer();
+    composites.push({ input: textComposite, left: 0, top: 0 });
   }
 
-  return canvas.toBuffer("image/png");
+  // ── Assembler sur fond transparent via sharp ───────────────────────────────
+  const base = sharp({
+    create: { width: W, height: H, channels: 4, background: { r:0, g:0, b:0, alpha:0 } }
+  }).png();
+
+  return composites.length > 0
+    ? base.composite(composites).toBuffer()
+    : base.toBuffer();
 }
 
 /**
