@@ -873,31 +873,22 @@ app.post("/webhook/orders-paid", async (req, res) => {
       await setOrderMetafield(order.id, `prod_url_${lineItemId}`, prodUrl);
       if (previewUrl) await setOrderMetafield(order.id, `preview_url_${lineItemId}`, previewUrl);
 
-      // ── INSERT gallery_items — réalisation client ──────────────────────────
+      // ── INSERT realized_plaques — réalisation client ───────────────────────
       try {
-        const promptParts = pagType === "bal"
-          ? [p["Ligne 1"], p["Ligne 2"], p["Ligne 3"], p["Ligne 4"]].filter(Boolean)
-          : [p["Numéro"], p["Nom de rue"], p["Ligne 1 rue"], p["Ligne 2 rue"], p["Ligne 3 rue"]].filter(Boolean);
-        const galleryPrompt = promptParts.join(" / ") || `Commande #${order.order_number}`;
-        const galleryCategory = detectCategory(galleryPrompt);
-
-        await supabase.from("gallery_items").insert({
-          id:              `order-${order.order_number}-${lineItemId}`,
-          group_id:        `order-${order.order_number}`,
-          created_at:      new Date().toISOString(),
-          prompt:          galleryPrompt,
-          category:        galleryCategory,
-          in_gallery:      true,
-          image_url:       prodUrl,
-          local_url:       null,
-          shopify_url:     prodUrl,
-          shopify_file_id: null,
+        await supabase.from("realized_plaques").insert({
+          image_url:      prodUrl,
+          color:          normalizeColor(p["Couleur plaque"] || p["Couleur"] || ""),
+          dimension:      p["Dimension"] || null,
+          thickness:      p["Epaisseur"] || p["Épaisseur"] || null,
+          left_logo_url:  pagType === "bal" ? (p["_logo_gauche"] || null) : null,
+          right_logo_url: pagType === "bal" ? (p["_logo_droite"] || null) : (p["_logo_url"] || null),
+          created_at:     new Date().toISOString(),
         });
-        console.log(`[PAG Webhook] ✅ gallery_items inséré — #${order.order_number}/${lineItemId}`);
+        console.log(`[PAG Webhook] ✅ realized_plaques inséré — #${order.order_number}/${lineItemId}`);
       } catch (e) {
-        console.warn(`[PAG Webhook] gallery_items insert failed:`, e.message);
+        console.warn("[PAG Webhook] realized_plaques insert failed:", e.message);
       }
-      // ── FIN INSERT gallery_items ───────────────────────────────────────────
+      // ── FIN INSERT realized_plaques ────────────────────────────────────────
 
       const colorLabel = {"acier-brosse":"Acier brossé","or":"Or","cuivre":"Cuivre","blanc":"Blanc","noir":"Noir","noir-brillant":"Noir brillant","gris":"Gris","noyer":"Noyer","rose":"Rose"}[normalizeColor(p["Couleur plaque"]||p["Couleur"]||"")] || "—";
 
@@ -916,16 +907,6 @@ app.post("/webhook/orders-paid", async (req, res) => {
   const noteFinale = `PAG — FICHIERS DE PRODUCTION\nCommande  : #${order.order_number}\nClient    : ${order.billing_address?.first_name||""} ${order.billing_address?.last_name||""} <${order.email}>\nGénéré le : ${timestamp}\n\n${notesParts.join("\n\n")}`;
   await updateOrderNote(order.id, noteFinale);
   console.log(`[PAG Webhook] ✅ Note écrite sur commande #${order.order_number}`);
-});
-app.post("/api/gallery/update-category", checkAdminToken, async(req,res)=>{
-  try{
-    const{id,category}=req.body||{};
-    const VALID=["animaux","sport","medical","beaute","restauration","batiment","nature","symboles","divers"];
-    if(!id||!VALID.includes(category))return res.status(400).json({error:"id ou catégorie invalide"});
-    const{error}=await supabase.from("gallery_items").update({category}).eq("id",id);
-    if(error)throw error;
-    res.json({ok:true});
-  }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.listen(PORT,()=>{
