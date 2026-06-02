@@ -856,7 +856,7 @@ app.post("/webhook/orders-paid", async (req, res) => {
 
       if (!prodBuffer) { console.warn(`[PAG Webhook] Buffer vide item ${lineItemId}`); continue; }
 
-      // Upload Supabase Storage
+      // Upload Shopify CDN
       const uploaded = await uploadImageToShopify(prodBuffer, prodFilename, `Production #${order.order_number}`);
       prodUrl = uploaded?.url || null;
 
@@ -872,6 +872,32 @@ app.post("/webhook/orders-paid", async (req, res) => {
       previewUrl = p["Aperçu plaque"] || p["_image"] || "";
       await setOrderMetafield(order.id, `prod_url_${lineItemId}`, prodUrl);
       if (previewUrl) await setOrderMetafield(order.id, `preview_url_${lineItemId}`, previewUrl);
+
+      // ── INSERT gallery_items — réalisation client ──────────────────────────
+      try {
+        const promptParts = pagType === "bal"
+          ? [p["Ligne 1"], p["Ligne 2"], p["Ligne 3"], p["Ligne 4"]].filter(Boolean)
+          : [p["Numéro"], p["Nom de rue"], p["Ligne 1 rue"], p["Ligne 2 rue"], p["Ligne 3 rue"]].filter(Boolean);
+        const galleryPrompt = promptParts.join(" / ") || `Commande #${order.order_number}`;
+        const galleryCategory = detectCategory(galleryPrompt);
+
+        await supabase.from("gallery_items").insert({
+          id:              `order-${order.order_number}-${lineItemId}`,
+          group_id:        `order-${order.order_number}`,
+          created_at:      new Date().toISOString(),
+          prompt:          galleryPrompt,
+          category:        galleryCategory,
+          in_gallery:      true,
+          image_url:       prodUrl,
+          local_url:       null,
+          shopify_url:     prodUrl,
+          shopify_file_id: null,
+        });
+        console.log(`[PAG Webhook] ✅ gallery_items inséré — #${order.order_number}/${lineItemId}`);
+      } catch (e) {
+        console.warn(`[PAG Webhook] gallery_items insert failed:`, e.message);
+      }
+      // ── FIN INSERT gallery_items ───────────────────────────────────────────
 
       const colorLabel = {"acier-brosse":"Acier brossé","or":"Or","cuivre":"Cuivre","blanc":"Blanc","noir":"Noir","noir-brillant":"Noir brillant","gris":"Gris","noyer":"Noyer","rose":"Rose"}[normalizeColor(p["Couleur plaque"]||p["Couleur"]||"")] || "—";
 
