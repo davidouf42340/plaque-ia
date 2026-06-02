@@ -917,6 +917,16 @@ app.post("/webhook/orders-paid", async (req, res) => {
   await updateOrderNote(order.id, noteFinale);
   console.log(`[PAG Webhook] ✅ Note écrite sur commande #${order.order_number}`);
 });
+app.post("/api/gallery/update-category", checkAdminToken, async(req,res)=>{
+  try{
+    const{id,category}=req.body||{};
+    const VALID=["animaux","sport","medical","beaute","restauration","batiment","nature","symboles","divers"];
+    if(!id||!VALID.includes(category))return res.status(400).json({error:"id ou catégorie invalide"});
+    const{error}=await supabase.from("gallery_items").update({category}).eq("id",id);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
 
 app.listen(PORT,()=>{
   console.log(`Server running on port ${PORT}`);
