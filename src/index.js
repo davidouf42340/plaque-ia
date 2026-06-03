@@ -908,6 +908,51 @@ app.post("/webhook/orders-paid", async (req, res) => {
   await updateOrderNote(order.id, noteFinale);
   console.log(`[PAG Webhook] ✅ Note écrite sur commande #${order.order_number}`);
 });
+// ── TEMPLATES CRUD ────────────────────────────────────────────────────────────
+
+app.get("/api/templates", async(req,res)=>{
+  try{
+    const{data,error}=await supabase.from("templates").select("*").eq("active",true).order("created_at",{ascending:false});
+    if(error)throw error;
+    res.json({templates:data||[]});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.get("/api/templates/by-handle/:handle", async(req,res)=>{
+  try{
+    const{data,error}=await supabase.from("templates").select("*").eq("shopify_product_handle",req.params.handle).eq("active",true).single();
+    if(error)throw error;
+    if(!data)return res.status(404).json({error:"Template introuvable"});
+    res.json(data);
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.post("/api/templates", checkAdminToken, async(req,res)=>{
+  try{
+    const{name,image_url,zones,shopify_product_handle}=req.body||{};
+    if(!name||!image_url)return res.status(400).json({error:"name et image_url requis"});
+    const{data,error}=await supabase.from("templates").insert({name,image_url,zones:zones||[],shopify_product_handle:shopify_product_handle||null}).select().single();
+    if(error)throw error;
+    res.json({ok:true,template:data});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.put("/api/templates/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{name,image_url,zones,shopify_product_handle,active}=req.body||{};
+    const{data,error}=await supabase.from("templates").update({name,image_url,zones,shopify_product_handle,active}).eq("id",req.params.id).select().single();
+    if(error)throw error;
+    res.json({ok:true,template:data});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.delete("/api/templates/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{error}=await supabase.from("templates").update({active:false}).eq("id",req.params.id);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
 
 app.listen(PORT,()=>{
   console.log(`Server running on port ${PORT}`);
