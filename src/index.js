@@ -912,15 +912,34 @@ app.post("/webhook/orders-paid", async (req, res) => {
 
 app.get("/api/templates", async(req,res)=>{
   try{
-    const{data,error}=await supabase.from("templates").select("*").eq("active",true).order("created_at",{ascending:false});
+    const token=req.headers["x-admin-token"]||req.query.token||req.body?.token||"";
+    const isAdmin=token&&token===process.env.ADMIN_SECRET_TOKEN;
+    const showAll=req.query.all==="1"&&isAdmin;
+    let q=supabase.from("templates").select("*").order("created_at",{ascending:false});
+    if(!showAll)q=q.eq("active",true);
+    const{data,error}=await q;
     if(error)throw error;
-    res.json({templates:data||[]});
+    res.json(data||[]);
   }catch(e){res.status(500).json({error:e.message});}
+});
+
+// Upload image pour template → Shopify CDN (base64 JSON, auth par token pas origin)
+app.post("/api/templates/upload-image", checkAdminToken, uploadLimiter, async(req,res)=>{
+  try{
+    const{imageBase64,filename}=req.body||{};
+    if(!imageBase64)return res.status(400).json({error:"imageBase64 requis"});
+    const base64Data=imageBase64.replace(/^data:image\/\w+;base64,/,"");
+    const fileBuffer=Buffer.from(base64Data,"base64");
+    const fname="template-"+Date.now()+"-"+(filename||"tpl.png");
+    const optimized=await sharp(fileBuffer).resize(1400,null,{fit:"inside",withoutEnlargement:true}).png({compressionLevel:8}).toBuffer();
+    const result=await uploadImageToShopify(optimized,fname,"Template plaque");
+    res.json({ok:true,url:result.url});
+  }catch(e){console.error("Template upload error:",e.message);res.status(500).json({error:e.message});}
 });
 
 app.get("/api/templates/by-handle/:handle", async(req,res)=>{
   try{
-    const{data,error}=await supabase.from("templates").select("*").eq("shopify_product_handle",req.params.handle).eq("active",true).single();
+    const{data,error}=await supabase.from("templates").select("*").eq("shopify_product_handle",req.params.handle).neq("active",false).single();
     if(error)throw error;
     if(!data)return res.status(404).json({error:"Template introuvable"});
     res.json(data);
@@ -931,7 +950,7 @@ app.post("/api/templates", checkAdminToken, async(req,res)=>{
   try{
     const{name,image_url,zones,shopify_product_handle}=req.body||{};
     if(!name||!image_url)return res.status(400).json({error:"name et image_url requis"});
-    const{data,error}=await supabase.from("templates").insert({name,image_url,zones:zones||[],shopify_product_handle:shopify_product_handle||null}).select().single();
+    const{data,error}=await supabase.from("templates").insert({name,image_url,zones:zones||[],shopify_product_handle:shopify_product_handle||null,active:true}).select().single();
     if(error)throw error;
     res.json({ok:true,template:data});
   }catch(e){res.status(500).json({error:e.message});}
@@ -952,19 +971,6 @@ app.delete("/api/templates/:id", checkAdminToken, async(req,res)=>{
     if(error)throw error;
     res.json({ok:true});
   }catch(e){res.status(500).json({error:e.message});}
-});
-// Upload image template (auth par token, pas origin — fonctionne depuis Shopify preview)
-app.post("/api/templates/upload-image", checkAdminToken, uploadLimiter, async(req,res)=>{
-  try{
-    const{imageBase64,filename}=req.body||{};
-    if(!imageBase64)return res.status(400).json({error:"imageBase64 requis"});
-    const base64Data=imageBase64.replace(/^data:image\/\w+;base64,/,"");
-    const fileBuffer=Buffer.from(base64Data,"base64");
-    const fname="template-"+Date.now()+"-"+(filename||"tpl.png");
-    const optimized=await sharp(fileBuffer).resize(1400,null,{fit:"inside",withoutEnlargement:true}).png({compressionLevel:8}).toBuffer();
-    const result=await uploadImageToShopify(optimized,fname,"Template plaque");
-    res.json({ok:true,url:result.url});
-  }catch(e){console.error("Template upload error:",e.message);res.status(500).json({error:e.message});}
 });
 
 app.listen(PORT,()=>{
