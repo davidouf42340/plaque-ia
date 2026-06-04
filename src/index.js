@@ -953,6 +953,19 @@ app.delete("/api/templates/:id", checkAdminToken, async(req,res)=>{
     res.json({ok:true});
   }catch(e){res.status(500).json({error:e.message});}
 });
+// Upload image template (auth par token, pas origin — fonctionne depuis Shopify preview)
+app.post("/api/templates/upload-image", checkAdminToken, uploadLimiter, async(req,res)=>{
+  try{
+    const{imageBase64,filename}=req.body||{};
+    if(!imageBase64)return res.status(400).json({error:"imageBase64 requis"});
+    const base64Data=imageBase64.replace(/^data:image\/\w+;base64,/,"");
+    const fileBuffer=Buffer.from(base64Data,"base64");
+    const fname="template-"+Date.now()+"-"+(filename||"tpl.png");
+    const optimized=await sharp(fileBuffer).resize(1400,null,{fit:"inside",withoutEnlargement:true}).png({compressionLevel:8}).toBuffer();
+    const result=await uploadImageToShopify(optimized,fname,"Template plaque");
+    res.json({ok:true,url:result.url});
+  }catch(e){console.error("Template upload error:",e.message);res.status(500).json({error:e.message});}
+});
 
 app.listen(PORT,()=>{
   console.log(`Server running on port ${PORT}`);
