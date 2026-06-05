@@ -75,7 +75,7 @@ function checkOrigin(req, res, next) {
 }
 
 function checkAdminToken(req, res, next) {
-  const token = req.body?.token || req.headers["x-admin-token"] || "";
+  const token = req.body?.token || req.headers["x-admin-token"] || req.query?.token || "";
   if (!token || token !== process.env.ADMIN_SECRET_TOKEN) return res.status(401).json({ error: "Non autorisé." });
   next();
 }
