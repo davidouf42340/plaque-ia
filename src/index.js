@@ -948,9 +948,9 @@ app.get("/api/templates/by-handle/:handle", async(req,res)=>{
 
 app.post("/api/templates", checkAdminToken, async(req,res)=>{
   try{
-    const{name,image_url,zones,shopify_product_handle}=req.body||{};
+    const{name,image_url,zones,shopify_product_handle,shape_mode}=req.body||{};
     if(!name||!image_url)return res.status(400).json({error:"name et image_url requis"});
-    const{data,error}=await supabase.from("templates").insert({name,image_url,zones:zones||[],shopify_product_handle:shopify_product_handle||null,active:true}).select().single();
+    const{data,error}=await supabase.from("templates").insert({name,image_url,zones:zones||[],shopify_product_handle:shopify_product_handle||null,active:true,shape_mode:shape_mode===true}).select().single();
     if(error)throw error;
     res.json({ok:true,template:data});
   }catch(e){res.status(500).json({error:e.message});}
@@ -958,8 +958,10 @@ app.post("/api/templates", checkAdminToken, async(req,res)=>{
 
 app.put("/api/templates/:id", checkAdminToken, async(req,res)=>{
   try{
-    const{name,image_url,zones,shopify_product_handle,active}=req.body||{};
-    const{data,error}=await supabase.from("templates").update({name,image_url,zones,shopify_product_handle,active}).eq("id",req.params.id).select().single();
+    const{name,image_url,zones,shopify_product_handle,active,shape_mode}=req.body||{};
+    const update={name,image_url,zones,shopify_product_handle,active};
+    if(shape_mode!==undefined)update.shape_mode=shape_mode===true;
+    const{data,error}=await supabase.from("templates").update(update).eq("id",req.params.id).select().single();
     if(error)throw error;
     res.json({ok:true,template:data});
   }catch(e){res.status(500).json({error:e.message});}
