@@ -969,7 +969,7 @@ app.put("/api/templates/:id", checkAdminToken, async(req,res)=>{
 
 app.delete("/api/templates/:id", checkAdminToken, async(req,res)=>{
   try{
-    const{error}=await supabase.from("templates").update({active:false}).eq("id",req.params.id);
+    const{error}=await supabase.from("templates").delete().eq("id",req.params.id);
     if(error)throw error;
     res.json({ok:true});
   }catch(e){res.status(500).json({error:e.message});}
