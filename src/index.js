@@ -711,13 +711,35 @@ async function renderProdBAL({ dimension, color, lines, fontFamily, fontSize, te
 
   const filteredLines = (lines||[]).filter(l=>l.trim().length>0);
   if (filteredLines.length) {
-    const clientFs = fontSize ? Math.round(fontSize) : calcAutoFontSizeServer(filteredLines, Math.round(textWidth/scaleY), CLIENT_H, hasLeft, hasRight);
-    const scaledFs = Math.max(Math.round(clientFs * scaleY), 8);
     const fontName = fontFamily || "Baskvill";
+    const align    = textAlign || "center";
+    let scaledFs;
+    if (fontSize) {
+      scaledFs = Math.max(Math.round(fontSize * scaleY), 8);
+    } else {
+      // Compute base font size from height ratio (no character-count penalty)
+      const lc = filteredLines.length;
+      let baseRatio;
+      if      (lc===1) baseRatio = (hasLeft&&hasRight)?0.42:(hasLeft||hasRight)?0.48:0.55;
+      else if (lc===2) baseRatio = (hasLeft&&hasRight)?0.26:(hasLeft||hasRight)?0.30:0.36;
+      else if (lc===3) baseRatio = (hasLeft&&hasRight)?0.19:(hasLeft||hasRight)?0.22:0.26;
+      else             baseRatio = (hasLeft&&hasRight)?0.15:(hasLeft||hasRight)?0.17:0.20;
+      scaledFs = Math.max(Math.round(CLIENT_H * baseRatio * scaleY), 8);
+      // Shrink until the widest line fits within 93% of textWidth
+      const testCanvas = createCanvas(W, H);
+      const testCtx = testCanvas.getContext("2d");
+      let iterations = 0;
+      while (scaledFs > 8 && iterations < 40) {
+        testCtx.font = `bold ${scaledFs}px "${fontName}", Arial, sans-serif`;
+        const maxW = Math.max(...filteredLines.map(l => testCtx.measureText(l).width));
+        if (maxW <= textWidth * 0.93) break;
+        scaledFs = Math.max(Math.round(scaledFs * 0.92), 8);
+        iterations++;
+      }
+    }
     const lineGap  = Math.round(scaledFs * 1.28);
     const totalTH  = lineGap * filteredLines.length;
     const startY   = Math.round((H-totalTH)/2 + scaledFs*0.82);
-    const align    = textAlign || "center";
     const textCanvas = createCanvas(W, H);
     const ctx = textCanvas.getContext("2d");
     ctx.clearRect(0,0,W,H);
