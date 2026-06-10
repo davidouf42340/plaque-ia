@@ -898,7 +898,7 @@ app.post("/webhook/orders-paid", async (req, res) => {
       // ── INSERT realized_plaques — réalisation client ───────────────────────
       try {
         await supabase.from("realized_plaques").insert({
-          image_url:      prodUrl,
+          image_url:      previewUrl || prodUrl,
           color:          normalizeColor(p["Couleur plaque"] || p["Couleur"] || ""),
           dimension:      p["Dimension"] || null,
           thickness:      p["Epaisseur"] || p["Épaisseur"] || null,
