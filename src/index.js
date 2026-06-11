@@ -461,6 +461,25 @@ app.get("/api/gallery/categories",async(req,res)=>{
   catch(e){res.status(500).json({error:"gallery categories error"});}
 });
 
+// ── Téléchargement forcé PNG ───────────────────────────────────────────────
+app.get("/download-png", async(req,res)=>{
+  try {
+    const url = String(req.query.url||"").trim();
+    if(!url || !url.startsWith("https://cdn.shopify.com/")) return res.status(400).send("URL invalide");
+    const filename = url.split("/").pop().split("?")[0] || "production.png";
+    const response = await fetch(url, { headers: { "Accept": "image/png,image/*", "User-Agent": "Mozilla/5.0" } });
+    if(!response.ok) return res.status(502).send("Erreur téléchargement");
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.set({
+      "Content-Type": "image/png",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": buffer.length,
+      "Cache-Control": "no-cache"
+    });
+    res.send(buffer);
+  } catch(e) { res.status(500).send("Erreur serveur"); }
+});
+
 app.get("/api/gallery",async(req,res)=>{
   try{
     const cat=String(req.query.category||"tous").toLowerCase().trim();
@@ -878,13 +897,19 @@ app.post("/webhook/orders-paid", async (req, res) => {
 
       if (!prodBuffer) { console.warn(`[PAG Webhook] Buffer vide item ${lineItemId}`); continue; }
 
-      // Upload Shopify CDN
-      const uploaded = await uploadImageToShopify(prodBuffer, prodFilename, `Production #${order.order_number}`);
-      prodUrl = uploaded?.url || null;
+      // Upload Supabase Storage en priorité (PNG garanti, pas de conversion WebP)
+      const supabaseProdUrl = await uploadToSupabaseStorage(prodBuffer, prodFilename);
+      if (supabaseProdUrl) {
+        prodUrl = supabaseProdUrl;
+        console.log(`[PAG Webhook] ✅ Fichier prod Supabase : ${prodUrl.slice(0,80)}`);
+      }
+      // Upload Shopify CDN aussi (pour miniature dans l'admin commande)
+      try {
+        const uploaded = await uploadImageToShopify(prodBuffer, prodFilename, `Production #${order.order_number}`);
+        if (!prodUrl && uploaded?.url) prodUrl = uploaded.url;
+      } catch(e) { console.warn("[PAG Webhook] Shopify upload failed:", e.message); }
 
-      if (prodUrl) {
-        console.log(`[PAG Webhook] ✅ Fichier prod : ${prodUrl.slice(0,80)}`);
-      } else {
+      if (!prodUrl) {
         const localPath = path.join(productionDir, prodFilename);
         fs.writeFileSync(localPath, prodBuffer);
         prodUrl = `${process.env.PUBLIC_BASE_URL}/generated/production/${prodFilename}`;
@@ -913,11 +938,13 @@ app.post("/webhook/orders-paid", async (req, res) => {
       // ── FIN INSERT realized_plaques ────────────────────────────────────────
 
       const colorLabel = {"acier-brosse":"Acier brossé","or":"Or","cuivre":"Cuivre","blanc":"Blanc","noir":"Noir","noir-brillant":"Noir brillant","gris":"Gris","noyer":"Noyer","rose":"Rose"}[normalizeColor(p["Couleur plaque"]||p["Couleur"]||"")] || "—";
+      const RAILWAY_BASE = process.env.PUBLIC_BASE_URL || "https://plaque-ia-production.up.railway.app";
+      const prodUrlPng = prodUrl && prodUrl.includes("cdn.shopify.com") ? `${RAILWAY_BASE}/download-png?url=${encodeURIComponent(prodUrl)}` : prodUrl;
 
       if (pagType === "bal") {
-        notesParts.push(`${sep}\nPLAQUE BAL — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Epaisseur"]||"—"} mm\nPolice     : ${p["Police"]||"—"}\nAlignement : ${p["Alignement"]||"—"}\nTexte      : ${[p["Ligne 1"],p["Ligne 2"],p["Ligne 3"],p["Ligne 4"]].filter(Boolean).join(" / ")||"—"}\nLogo G     : ${p["_logo_gauche"]||"aucun"}\nLogo D     : ${p["_logo_droite"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+        notesParts.push(`${sep}\nPLAQUE BAL — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Epaisseur"]||"—"} mm\nPolice     : ${p["Police"]||"—"}\nAlignement : ${p["Alignement"]||"—"}\nTexte      : ${[p["Ligne 1"],p["Ligne 2"],p["Ligne 3"],p["Ligne 4"]].filter(Boolean).join(" / ")||"—"}\nLogo G     : ${p["_logo_gauche"]||"aucun"}\nLogo D     : ${p["_logo_droite"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrlPng}\n${sep}`);
       } else {
-        notesParts.push(`${sep}\nPLAQUE RUE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nRue        : ${p["Nom de rue"]||[p["Ligne 1 rue"],p["Ligne 2 rue"],p["Ligne 3 rue"]].filter(Boolean).join(" / ")||"—"}\nPolice     : ${p["Police"]||"—"}\nLogo       : ${p["_logo_url"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+        notesParts.push(`${sep}\nPLAQUE RUE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nRue        : ${p["Nom de rue"]||[p["Ligne 1 rue"],p["Ligne 2 rue"],p["Ligne 3 rue"]].filter(Boolean).join(" / ")||"—"}\nPolice     : ${p["Police"]||"—"}\nLogo       : ${p["_logo_url"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrlPng}\n${sep}`);
       }
 
     } catch (e) {
