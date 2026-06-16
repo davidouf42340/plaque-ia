@@ -461,25 +461,6 @@ app.get("/api/gallery/categories",async(req,res)=>{
   catch(e){res.status(500).json({error:"gallery categories error"});}
 });
 
-// ── Téléchargement forcé PNG ───────────────────────────────────────────────
-app.get("/download-png", async(req,res)=>{
-  try {
-    const url = String(req.query.url||"").trim();
-    if(!url || !url.startsWith("https://cdn.shopify.com/")) return res.status(400).send("URL invalide");
-    const filename = url.split("/").pop().split("?")[0] || "production.png";
-    const response = await fetch(url, { headers: { "Accept": "image/png,image/*", "User-Agent": "Mozilla/5.0" } });
-    if(!response.ok) return res.status(502).send("Erreur téléchargement");
-    const buffer = Buffer.from(await response.arrayBuffer());
-    res.set({
-      "Content-Type": "image/png",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Content-Length": buffer.length,
-      "Cache-Control": "no-cache"
-    });
-    res.send(buffer);
-  } catch(e) { res.status(500).send("Erreur serveur"); }
-});
-
 app.get("/api/gallery",async(req,res)=>{
   try{
     const cat=String(req.query.category||"tous").toLowerCase().trim();
@@ -832,6 +813,65 @@ async function renderProdRUE({ dimension, color, number, streetLines, fontFamily
   return composites.length>0 ? base.composite(composites).toBuffer() : base.toBuffer();
 }
 
+// ── Génération fichier production BAL TEMPLATE ───────────────────────────────
+async function renderProdBALTemplate({ templateHandle, zoneValues, fontFamily, fontSize }) {
+  // 1. Récupérer le template depuis Supabase
+  const { data: tpl, error } = await supabase.from("templates").select("*")
+    .eq("shopify_product_handle", templateHandle).neq("active", false).single();
+  if (error || !tpl) throw new Error(`Template introuvable: ${templateHandle}`);
+
+  // 2. Télécharger le PNG du template
+  const imgResp = await fetch(tpl.image_url);
+  if (!imgResp.ok) throw new Error(`Impossible de télécharger le template PNG: ${tpl.image_url}`);
+  const imgBuf = Buffer.from(await imgResp.arrayBuffer());
+  const meta = await sharp(imgBuf).metadata();
+  const SCALE = 3;
+  const W = meta.width * SCALE, H = meta.height * SCALE;
+
+  // 3. Redimensionner le template à 3×
+  const scaledTpl = await sharp(imgBuf).resize(W, H, { fit: "fill" }).ensureAlpha().png().toBuffer();
+
+  // 4. Dessiner le texte des zones
+  const composites = [{ input: scaledTpl, left: 0, top: 0 }];
+  const zones = Array.isArray(tpl.zones) ? tpl.zones : [];
+  const fontName = fontFamily || "Baskvill";
+
+  if (zones.length) {
+    const textCanvas = createCanvas(W, H);
+    const ctx = textCanvas.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#111111";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    zones.forEach(z => {
+      const key = z.label || z.id;
+      const text = ((zoneValues[key] || zoneValues[z.id] || "")).trim();
+      if (!text) return;
+      const zx = z.x * W, zy = z.y * H, zw = z.w * W, zh = z.h * H;
+
+      let fs = fontSize ? Math.round(fontSize * SCALE) : null;
+      if (!fs) {
+        fs = Math.floor(zh * 0.75);
+        const minFs = 8;
+        while (fs > minFs) {
+          ctx.font = `bold ${fs}px "${fontName}", Arial, sans-serif`;
+          if (ctx.measureText(text).width <= zw * 0.92) break;
+          fs = Math.max(Math.round(fs * 0.92), minFs);
+        }
+      }
+      ctx.font = `bold ${fs}px "${fontName}", Arial, sans-serif`;
+      ctx.fillText(text, zx + zw / 2, zy + zh / 2);
+    });
+
+    const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+    composites.push({ input: textBuf, left: 0, top: 0 });
+  }
+
+  return sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .png().composite(composites).toBuffer();
+}
+
 // ── WEBHOOK SHOPIFY orders/paid ───────────────────────────────────────────────
 app.post("/webhook/orders-paid", async (req, res) => {
   const hmacHeader = req.headers["x-shopify-hmac-sha256"];
@@ -893,37 +933,43 @@ app.post("/webhook/orders-paid", async (req, res) => {
           layout:      p["_layout"]         || "image-left",
         });
         prodFilename = `prod-rue-${order.order_number}-${lineItemId}.png`;
+
+      } else if (pagType === "bal-template") {
+        // Récupérer les valeurs des zones (toutes les propriétés sans préfixe _)
+        const zoneValues = {};
+        Object.entries(p).forEach(([k, v]) => { if (!k.startsWith("_") && k !== "Template") zoneValues[k] = v; });
+        prodBuffer = await renderProdBALTemplate({
+          templateHandle: p["_template_handle"] || "",
+          zoneValues,
+          fontFamily:     p["_Police"]   || "Baskvill",
+          fontSize:       p["_FontSize"] ? Number(p["_FontSize"]) : null,
+        });
+        prodFilename = `prod-bal-tpl-${order.order_number}-${lineItemId}.png`;
       }
 
       if (!prodBuffer) { console.warn(`[PAG Webhook] Buffer vide item ${lineItemId}`); continue; }
 
-      // Upload Supabase Storage en priorité (PNG garanti, pas de conversion WebP)
-      const supabaseProdUrl = await uploadToSupabaseStorage(prodBuffer, prodFilename);
-      if (supabaseProdUrl) {
-        prodUrl = supabaseProdUrl;
-        console.log(`[PAG Webhook] ✅ Fichier prod Supabase : ${prodUrl.slice(0,80)}`);
-      }
-      // Upload Shopify CDN aussi (pour miniature dans l'admin commande)
-      try {
-        const uploaded = await uploadImageToShopify(prodBuffer, prodFilename, `Production #${order.order_number}`);
-        if (!prodUrl && uploaded?.url) prodUrl = uploaded.url;
-      } catch(e) { console.warn("[PAG Webhook] Shopify upload failed:", e.message); }
+      // Upload Shopify CDN
+      const uploaded = await uploadImageToShopify(prodBuffer, prodFilename, `Production #${order.order_number}`);
+      prodUrl = uploaded?.url || null;
 
-      if (!prodUrl) {
+      if (prodUrl) {
+        console.log(`[PAG Webhook] ✅ Fichier prod : ${prodUrl.slice(0,80)}`);
+      } else {
         const localPath = path.join(productionDir, prodFilename);
         fs.writeFileSync(localPath, prodBuffer);
         prodUrl = `${process.env.PUBLIC_BASE_URL}/generated/production/${prodFilename}`;
         console.warn(`[PAG Webhook] Fallback local : ${prodUrl.slice(0,80)}`);
       }
 
-      previewUrl = p["Aperçu plaque"] || p["_image"] || "";
+      previewUrl = p["Aperçu plaque"] || p["_image"] || p["_Aperçu"] || "";
       await setOrderMetafield(order.id, `prod_url_${lineItemId}`, prodUrl);
       if (previewUrl) await setOrderMetafield(order.id, `preview_url_${lineItemId}`, previewUrl);
 
       // ── INSERT realized_plaques — réalisation client ───────────────────────
       try {
         await supabase.from("realized_plaques").insert({
-          image_url:      previewUrl || prodUrl,
+          image_url:      prodUrl,
           color:          normalizeColor(p["Couleur plaque"] || p["Couleur"] || ""),
           dimension:      p["Dimension"] || null,
           thickness:      p["Epaisseur"] || p["Épaisseur"] || null,
@@ -938,13 +984,14 @@ app.post("/webhook/orders-paid", async (req, res) => {
       // ── FIN INSERT realized_plaques ────────────────────────────────────────
 
       const colorLabel = {"acier-brosse":"Acier brossé","or":"Or","cuivre":"Cuivre","blanc":"Blanc","noir":"Noir","noir-brillant":"Noir brillant","gris":"Gris","noyer":"Noyer","rose":"Rose"}[normalizeColor(p["Couleur plaque"]||p["Couleur"]||"")] || "—";
-      const RAILWAY_BASE = process.env.PUBLIC_BASE_URL || "https://plaque-ia-production.up.railway.app";
-      const prodUrlPng = prodUrl && prodUrl.includes("cdn.shopify.com") ? `${RAILWAY_BASE}/download-png?url=${encodeURIComponent(prodUrl)}` : prodUrl;
 
       if (pagType === "bal") {
-        notesParts.push(`${sep}\nPLAQUE BAL — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Epaisseur"]||"—"} mm\nPolice     : ${p["Police"]||"—"}\nAlignement : ${p["Alignement"]||"—"}\nTexte      : ${[p["Ligne 1"],p["Ligne 2"],p["Ligne 3"],p["Ligne 4"]].filter(Boolean).join(" / ")||"—"}\nLogo G     : ${p["_logo_gauche"]||"aucun"}\nLogo D     : ${p["_logo_droite"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrlPng}\n${sep}`);
+        notesParts.push(`${sep}\nPLAQUE BAL — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Epaisseur"]||"—"} mm\nPolice     : ${p["Police"]||"—"}\nAlignement : ${p["Alignement"]||"—"}\nTexte      : ${[p["Ligne 1"],p["Ligne 2"],p["Ligne 3"],p["Ligne 4"]].filter(Boolean).join(" / ")||"—"}\nLogo G     : ${p["_logo_gauche"]||"aucun"}\nLogo D     : ${p["_logo_droite"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+      } else if (pagType === "bal-template") {
+        const zoneLines = Object.entries(p).filter(([k])=>!k.startsWith("_")&&k!=="Template").map(([k,v])=>`${k.padEnd(10)}: ${v}`).join("\n");
+        notesParts.push(`${sep}\nPLAQUE TEMPLATE — Item #${lineItemId}\n${sep}\nTemplate   : ${p["_Template"]||p["_template_handle"]||"—"}\nPolice     : ${p["_Police"]||"—"}\n${zoneLines}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
       } else {
-        notesParts.push(`${sep}\nPLAQUE RUE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nRue        : ${p["Nom de rue"]||[p["Ligne 1 rue"],p["Ligne 2 rue"],p["Ligne 3 rue"]].filter(Boolean).join(" / ")||"—"}\nPolice     : ${p["Police"]||"—"}\nLogo       : ${p["_logo_url"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrlPng}\n${sep}`);
+        notesParts.push(`${sep}\nPLAQUE RUE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nRue        : ${p["Nom de rue"]||[p["Ligne 1 rue"],p["Ligne 2 rue"],p["Ligne 3 rue"]].filter(Boolean).join(" / ")||"—"}\nPolice     : ${p["Police"]||"—"}\nLogo       : ${p["_logo_url"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
       }
 
     } catch (e) {
