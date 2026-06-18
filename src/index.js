@@ -612,7 +612,7 @@ app.post("/api/realized/delete", checkAdminToken, async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-app.get("/api/realized",async(req,res)=>{
+app.get("/api/realized", async(req,res)=>{
   try{
     const limit=Math.min(Number(req.query.limit)||100,500);
     const{data,error}=await supabase.from("realized_plaques").select("id, image_url, color, dimension, thickness, left_logo_url, right_logo_url, created_at").order("created_at",{ascending:false}).limit(limit);
@@ -848,7 +848,8 @@ async function renderProdBALTemplate({ templateHandle, zoneValues, fontFamily, f
       const key = z.label || z.id;
       const text = ((zoneValues[key] || zoneValues[z.id] || "")).trim();
       if (!text) return;
-      const zx = z.x * W, zy = z.y * H, zw = z.w * W, zh = z.h * H;
+      // zones stockées en % (0-100) dans Supabase
+      const zx = (z.x/100) * W, zy = (z.y/100) * H, zw = (z.w/100) * W, zh = (z.h/100) * H;
 
       let fs = fontSize ? Math.round(fontSize * SCALE) : null;
       if (!fs) {
