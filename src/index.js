@@ -828,8 +828,15 @@ async function renderProdBALTemplate({ templateHandle, zoneValues, fontFamily, f
   const SCALE = 3;
   const W = meta.width * SCALE, H = meta.height * SCALE;
 
-  // 3. Redimensionner le template à 3×
-  const scaledTpl = await sharp(imgBuf).resize(W, H, { fit: "fill" }).ensureAlpha().png().toBuffer();
+  // 3. Rendre le fond blanc transparent, puis redimensionner à 3×
+  const { data: rawData, info: rawInfo } = await sharp(imgBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  for (let i = 0; i < rawData.length; i += 4) {
+    if (rawData[i] > 230 && rawData[i+1] > 230 && rawData[i+2] > 230) rawData[i+3] = 0;
+  }
+  const transparentTpl = await sharp(Buffer.from(rawData), {
+    raw: { width: rawInfo.width, height: rawInfo.height, channels: 4 }
+  }).resize(W, H, { fit: "fill" }).png().toBuffer();
+  const scaledTpl = transparentTpl;
 
   // 4. Dessiner le texte des zones
   const composites = [{ input: scaledTpl, left: 0, top: 0 }];
