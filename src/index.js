@@ -438,11 +438,12 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
 // ── Preview RUE (upsell popup) ────────────────────────────────────────────────
 app.post("/api/preview/rue", checkOrigin, async(req,res)=>{
   try {
-    const { color="acier-brosse", number="", streetLines=[], fontFamily="Baskvill", logoUrl=null, dimension="150x100mm" } = req.body||{};
+    const { color="acier-brosse", number="", streetLines=[], fontFamily="Baskvill", logoUrl=null, dimension="150x100mm", numScale=100, streetScale=100 } = req.body||{};
     const buf = await renderProdRUE({
       dimension, color: normalizeColor(color), number,
       streetLines: Array.isArray(streetLines) ? streetLines : [streetLines].filter(Boolean),
-      fontFamily, numScale:100, streetScale:100, logoUrl: logoUrl||null, layout:"image-left"
+      fontFamily, numScale: Number(numScale)||100, streetScale: Number(streetScale)||100,
+      logoUrl: logoUrl||null, layout:"image-left"
     });
     // Resize to thumbnail ~600×400 for fast delivery
     const thumb = await sharp(buf).resize(600, 400, { fit:"contain", background:{r:0,g:0,b:0,alpha:0} }).png().toBuffer();
