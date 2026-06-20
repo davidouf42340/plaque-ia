@@ -435,6 +435,22 @@ app.post("/api/render/production-from-image", checkOrigin, uploadLimiter, async(
   } catch(error){console.error("Erreur /api/render/production-from-image :",error);return res.status(500).json({error:error?.message||"Erreur interne génération production."});}
 });
 
+// ── Preview RUE (upsell popup) ────────────────────────────────────────────────
+app.post("/api/preview/rue", checkOrigin, async(req,res)=>{
+  try {
+    const { color="acier-brosse", number="", streetLines=[], fontFamily="Baskvill", logoUrl=null, dimension="150x100mm" } = req.body||{};
+    const buf = await renderProdRUE({
+      dimension, color: normalizeColor(color), number,
+      streetLines: Array.isArray(streetLines) ? streetLines : [streetLines].filter(Boolean),
+      fontFamily, numScale:100, streetScale:100, logoUrl: logoUrl||null, layout:"image-left"
+    });
+    // Resize to thumbnail ~600×400 for fast delivery
+    const thumb = await sharp(buf).resize(600, 400, { fit:"contain", background:{r:0,g:0,b:0,alpha:0} }).png().toBuffer();
+    const b64 = thumb.toString("base64");
+    return res.json({ image: "data:image/png;base64," + b64 });
+  } catch(e) { return res.status(500).json({ error: e.message }); }
+});
+
 app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
   try {
     const rawColor=req.body?.color||"",rawDim=req.body?.dimension||"",rawThick=req.body?.thickness||"";
