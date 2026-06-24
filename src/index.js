@@ -42,6 +42,7 @@ const fontsDir      = path.join(__dirname, "fonts");
 fs.mkdirSync(logosDir,      { recursive: true });
 fs.mkdirSync(productionDir, { recursive: true });
 app.use("/generated", express.static(generatedDir));
+app.use("/assets", express.static(path.join(__dirname, "../assets")));
 
 const fontFiles = [
   "Allura","Amandine","Arlrdbd","Baskvill","Bernhc","Calinastiya",
