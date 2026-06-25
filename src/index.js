@@ -188,6 +188,30 @@ const RUE_VARIANT_MAP = {
 };
 
 
+const FAMILLE_VARIANT_MAP = {
+  "150x100mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423897674091},"or":{variantId:53423897706859},"cuivre":{variantId:53423897739627},"blanc":{variantId:53423897772395},"noir":{variantId:53423897805163},"gris":{variantId:53423897837931},"noyer":{variantId:53423897870699},"rose":{variantId:53423897903467}},
+    "1.6mm - À fixer":{"acier-brosse":{variantId:53423897936235},"or":{variantId:53423897969003},"cuivre":{variantId:53423898001771},"blanc":{variantId:53423898034539},"noir":{variantId:53423898067307}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423898100075},"or":{variantId:53423898132843},"cuivre":{variantId:53423898165611},"blanc":{variantId:53423898198379},"noir":{variantId:53423898231147}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423898263915},"or":{variantId:53423898296683},"cuivre":{variantId:53423898329451},"blanc":{variantId:53423898362219},"noir":{variantId:53423898394987}}
+  },
+  "200x133mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423898427755},"or":{variantId:53423898460523},"cuivre":{variantId:53423898493291},"blanc":{variantId:53423898526059},"noir":{variantId:53423898558827},"gris":{variantId:53423898591595},"noyer":{variantId:53423898624363},"rose":{variantId:53423898657131}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423898689899},"or":{variantId:53423898722667},"cuivre":{variantId:53423898755435},"blanc":{variantId:53423898788203},"noir":{variantId:53423898820971}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423898853739},"or":{variantId:53423898886507},"cuivre":{variantId:53423898919275},"blanc":{variantId:53423898952043},"noir":{variantId:53423898984811}}
+  },
+  "250x167mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423899672939},"or":{variantId:53423899705707},"cuivre":{variantId:53423899738475},"blanc":{variantId:53423899771243},"noir":{variantId:53423899804011},"gris":{variantId:53423899836779},"noyer":{variantId:53423899869547},"rose":{variantId:53423899902315}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423899935083},"or":{variantId:53423899967851},"cuivre":{variantId:53423900000619},"blanc":{variantId:53423900033387},"noir":{variantId:53423900066155}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423900098923},"or":{variantId:53423900131691},"cuivre":{variantId:53423900164459},"blanc":{variantId:53423900197227},"noir":{variantId:53423900229995}}
+  },
+  "300x200mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423900262763},"or":{variantId:53423900295531},"cuivre":{variantId:53423900328299},"blanc":{variantId:53423900361067},"noir":{variantId:53423900393835},"gris":{variantId:53423900426603},"noyer":{variantId:53423900459371},"rose":{variantId:53423900492139}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423900524907},"or":{variantId:53423900557675},"cuivre":{variantId:53423900590443},"blanc":{variantId:53423900623211},"noir":{variantId:53423900655979}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423900688747},"or":{variantId:53423900721515},"cuivre":{variantId:53423900754283},"blanc":{variantId:53423900787051},"noir":{variantId:53423900819819}}
+  }
+};
+
 // ── DIMENSIONS canvas prod (px à 300dpi) ────────────────────────────────────
 const DIMENSION_MAP_BAL = {
   "60x15mm":   { w:709,  h:177  },
@@ -204,6 +228,33 @@ const DIMENSION_MAP_RUE = {
   "250x167mm": { w:2953, h:1972 },
   "300x200mm": { w:3543, h:2362 },
 };
+
+const DIMENSION_MAP_FAMILLE = {
+  "150x100mm": { w:1772, h:1181 },
+  "200x133mm": { w:2362, h:1571 },
+  "250x167mm": { w:2953, h:1972 },
+  "300x200mm": { w:3543, h:2362 },
+};
+
+const TYPES_MEMBRES_SERVER = [
+  { key:"pap",    heightRatio:1.00 },
+  { key:"mum",    heightRatio:1.00 },
+  { key:"ado",    heightRatio:0.82 },
+  { key:"adof",   heightRatio:0.82 },
+  { key:"garcon", heightRatio:0.65 },
+  { key:"fille",  heightRatio:0.65 },
+  { key:"bb",     heightRatio:0.45 },
+];
+const TYPES_ANIMAUX_SERVER = [
+  { key:"cat", heightRatio:0.45 },
+  { key:"dog", heightRatio:0.45 },
+];
+const SINGLE_VARIANT_FAMILLE = new Set(["pap","mum","bb"]);
+function buildPngKeyServer(key, variant) {
+  return SINGLE_VARIANT_FAMILLE.has(key) ? `${key}.png` : `${key}${variant}.png`;
+}
+
+const FAMILLE_DECO_URL = "https://cdn.shopify.com/s/files/1/0983/8569/0987/files/famille-deco.png?v=1782296677";
 
 const WHITE_ELEMENTS_PROD = ["noir","noir-brillant","gris","noyer","rose"];
 
@@ -459,6 +510,12 @@ app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
     const fixation=req.body?.fixation||null,productHandle=req.body?.productHandle||null;
     const color=normalizeColor(rawColor),dimension=normalizeDimension(rawDim),thickness=normalizeThickness(rawThick);
     if(!dimension||!thickness||!color)return res.status(400).json({error:"Dimension, épaisseur ou couleur manquante."});
+    if(productHandle&&productHandle.includes("famille")){
+      const epFix=thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
+      const found=FAMILLE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
+      if(found)return res.json(found);
+      return res.status(404).json({error:`Variant famille introuvable: ${dimension} / ${epFix} / ${color}`});
+    }
     if(productHandle&&productHandle.includes("rue")){
       const epFix=thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
       const found=RUE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
@@ -898,6 +955,114 @@ async function renderProdBALTemplate({ templateHandle, zoneValues, fontFamily, f
     .png().composite(composites).toBuffer();
 }
 
+// ── Génération fichier production FAMILLE ────────────────────────────────────
+async function renderProdFamille({ dimension, membres, animaux, nom, numero, fontNom, fontPrenom, fontNumero, nomSize, numeroSize }) {
+  const dimKey = normalizeDimension(dimension);
+  const dims = DIMENSION_MAP_FAMILLE[dimKey] || DIMENSION_MAP_FAMILLE["200x133mm"];
+  const W = dims.w, H = dims.h;
+  const composites = [];
+  const RAILWAY_BASE = (process.env.PUBLIC_BASE_URL || "https://simulateur-pag.up.railway.app").replace(/\/$/, "");
+
+  // 1. Deco (noir sur transparent)
+  try {
+    const decoResp = await fetch(FAMILLE_DECO_URL);
+    if (decoResp.ok) {
+      const decoBuf = Buffer.from(await decoResp.arrayBuffer());
+      const { data: dd, info: di } = await sharp(decoBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      for (let i = 0; i < dd.length; i += 4) { if (dd[i+3] > 10) { dd[i]=17; dd[i+1]=17; dd[i+2]=17; } }
+      const decoBlack = await sharp(Buffer.from(dd), { raw:{ width:di.width, height:di.height, channels:4 } })
+        .resize(W, H, { fit:"fill" }).png().toBuffer();
+      composites.push({ input: decoBlack, left: 0, top: 0 });
+    }
+  } catch (e) { console.warn("[PAG Famille] deco error:", e.message); }
+
+  // 2. Canvas texte (nom, prénoms, numéro)
+  const textCanvas = createCanvas(W, H);
+  const ctx = textCanvas.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#111111";
+
+  // Nom de famille (1-3 lignes, textarea \n)
+  const nomLines = (nom || "").split("\n").map(l => l.trim()).filter(Boolean).slice(0, 3);
+  const NOM_AREA_TOP = Math.round(H * 0.04);
+  let TOP_H = Math.round(H * 0.24);
+  if (nomLines.length) {
+    const longest = nomLines.reduce((a, b) => a.length >= b.length ? a : b, "");
+    const nomBasePx = Math.min(H * 0.092, (W * 0.70) / Math.max(1, longest.length * 0.54 + 1));
+    const nomPx = Math.round(nomBasePx * ((nomSize || 100) / 100));
+    const nomLineH = Math.round(nomPx * 1.20);
+    const nomStartY = NOM_AREA_TOP + Math.round(nomPx * 0.5);
+    ctx.font = `bold ${nomPx}px "${fontNom || "Baskvill"}", Arial, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    nomLines.forEach((line, li) => { ctx.fillText(line, Math.round(W * 0.49), nomStartY + li * nomLineH); });
+    TOP_H = Math.max(TOP_H, Math.round(NOM_AREA_TOP + nomLines.length * nomLineH + nomPx * 0.5));
+  }
+
+  // Layout personnages
+  const all = [...(membres || []), ...(animaux || [])];
+  const numSizeFactor = (numeroSize || 100) / 100;
+  const showNum = !!(numero || "").trim();
+  const NUM_W = showNum ? Math.round(W * Math.min(0.40, Math.max(0.10, 0.10 + numSizeFactor * 0.14))) : 0;
+  const CHARS_W = W - NUM_W;
+  const ZONE_H = H - TOP_H - 6;
+  const PRENOM_H = Math.round(H * 0.058);
+  const CHAR_H = ZONE_H - PRENOM_H;
+  const slotW = all.length > 0 ? CHARS_W / all.length : CHARS_W;
+  const allTypes = [...TYPES_MEMBRES_SERVER, ...TYPES_ANIMAUX_SERVER];
+
+  // 3. Personnages (PNG noir)
+  for (let idx = 0; idx < all.length; idx++) {
+    const item = all[idx];
+    const typeInfo = allTypes.find(t => t.key === item.type) || { heightRatio: 0.70 };
+    const pKey = buildPngKeyServer(item.type, item.variant || 1);
+    try {
+      const pngResp = await fetch(`${RAILWAY_BASE}/assets/famille/${pKey}`);
+      if (pngResp.ok) {
+        const pngBuf = Buffer.from(await pngResp.arrayBuffer());
+        const { data: pd, info: pi } = await sharp(pngBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        for (let i = 0; i < pd.length; i += 4) { if (pd[i+3] > 10) { pd[i]=17; pd[i+1]=17; pd[i+2]=17; } }
+        const dh = Math.max(1, Math.round(CHAR_H * typeInfo.heightRatio));
+        const dw = Math.max(1, Math.round(dh * (pi.width / pi.height)));
+        const offX = item.offX || 0;
+        const cx = Math.round(slotW * idx + slotW / 2 + offX * slotW);
+        const left = Math.max(0, Math.min(W - dw, cx - Math.round(dw / 2)));
+        const top = Math.max(0, Math.round(TOP_H + CHAR_H - dh));
+        const blackPng = await sharp(Buffer.from(pd), { raw:{ width:pi.width, height:pi.height, channels:4 } })
+          .resize(dw, dh, { fit:"fill" }).png().toBuffer();
+        composites.push({ input: blackPng, left, top });
+      }
+    } catch (e) { console.warn(`[PAG Famille] PNG ${pKey} error:`, e.message); }
+
+    // Prénom + soulignement
+    if (item.prenom) {
+      const ps = Math.max(10, Math.min(Math.round(PRENOM_H * 0.70), Math.round(slotW / Math.max(1, item.prenom.length * 0.6 + 1))));
+      const offX = item.offX || 0;
+      const cx2 = slotW * idx + slotW / 2 + offX * slotW;
+      ctx.font = `${ps}px "${fontPrenom || "Baskvill"}", Arial, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      const py = TOP_H + CHAR_H + 4;
+      ctx.fillText(item.prenom, cx2, py);
+      const tw = ctx.measureText(item.prenom).width;
+      ctx.strokeStyle = "#111111"; ctx.lineWidth = Math.max(1.5, ps * 0.11);
+      ctx.beginPath(); ctx.moveTo(cx2 - tw/2, py + ps + 1); ctx.lineTo(cx2 + tw/2, py + ps + 1); ctx.stroke();
+    }
+  }
+
+  // Numéro (bas droite)
+  if (showNum) {
+    const numPx = Math.round(Math.min(NUM_W * 0.88, ZONE_H * 0.70) * numSizeFactor);
+    ctx.font = `bold ${numPx}px "${fontNumero || "Baskvill"}", Arial, sans-serif`;
+    ctx.fillStyle = "#111111"; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    ctx.fillText(numero, W - Math.round(W * 0.02), H - Math.round(H * 0.04));
+  }
+
+  const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+  composites.push({ input: textBuf, left: 0, top: 0 });
+
+  return sharp({ create:{ width:W, height:H, channels:4, background:{ r:0, g:0, b:0, alpha:0 } } })
+    .png().composite(composites).toBuffer();
+}
+
 // ── WEBHOOK SHOPIFY orders/paid ───────────────────────────────────────────────
 app.post("/webhook/orders-paid", async (req, res) => {
   const hmacHeader = req.headers["x-shopify-hmac-sha256"];
@@ -971,6 +1136,24 @@ app.post("/webhook/orders-paid", async (req, res) => {
           fontSize:       p["_FontSize"] ? Number(p["_FontSize"]) : null,
         });
         prodFilename = `prod-bal-tpl-${order.order_number}-${lineItemId}.png`;
+
+      } else if (pagType === "famille") {
+        let membres = [], animaux = [];
+        try { membres = JSON.parse(p["_membres"] || "[]"); } catch (e) {}
+        try { animaux = JSON.parse(p["_animaux"] || "[]"); } catch (e) {}
+        prodBuffer = await renderProdFamille({
+          dimension:  p["Dimension"]      || "200x133mm",
+          membres,
+          animaux,
+          nom:        p["Nom de famille"] || "",
+          numero:     p["Numéro"]         || "",
+          fontNom:    p["Police nom"]     || "Baskvill",
+          fontPrenom: p["Police prénoms"] || "Baskvill",
+          fontNumero: p["Police numéro"]  || "Baskvill",
+          nomSize:    Number(p["_nom_size"]    || 100),
+          numeroSize: Number(p["_numero_size"] || 100),
+        });
+        prodFilename = `prod-famille-${order.order_number}-${lineItemId}.png`;
       }
 
       if (!prodBuffer) { console.warn(`[PAG Webhook] Buffer vide item ${lineItemId}`); continue; }
@@ -1016,6 +1199,8 @@ app.post("/webhook/orders-paid", async (req, res) => {
       } else if (pagType === "bal-template") {
         const zoneLines = Object.entries(p).filter(([k])=>!k.startsWith("_")&&k!=="Template").map(([k,v])=>`${k.padEnd(10)}: ${v}`).join("\n");
         notesParts.push(`${sep}\nPLAQUE TEMPLATE — Item #${lineItemId}\n${sep}\nTemplate   : ${p["_Template"]||p["_template_handle"]||"—"}\nPolice     : ${p["_Police"]||"—"}\n${zoneLines}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+      } else if (pagType === "famille") {
+        notesParts.push(`${sep}\nPLAQUE FAMILLE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNom        : ${p["Nom de famille"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nPolice nom : ${p["Police nom"]||"—"}\nPolice pré : ${p["Police prénoms"]||"—"}\nMembres    : ${p["_membres"]||"—"}\nAnimaux    : ${p["_animaux"]||"—"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
       } else {
         notesParts.push(`${sep}\nPLAQUE RUE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nRue        : ${p["Nom de rue"]||[p["Ligne 1 rue"],p["Ligne 2 rue"],p["Ligne 3 rue"]].filter(Boolean).join(" / ")||"—"}\nPolice     : ${p["Police"]||"—"}\nLogo       : ${p["_logo_url"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
       }
