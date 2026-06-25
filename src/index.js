@@ -212,6 +212,30 @@ const FAMILLE_VARIANT_MAP = {
   }
 };
 
+const PROFESSIONNEL_VARIANT_MAP = {
+  "150x100mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423982313835},"or":{variantId:53423990735211},"cuivre":{variantId:53423990767979},"blanc":{variantId:53423990800747},"noir":{variantId:53423990833515},"gris":{variantId:53423990866283},"noyer":{variantId:53423990899051},"rose":{variantId:53423990931819}},
+    "1.6mm - À fixer":{"acier-brosse":{variantId:53423990964587},"or":{variantId:53423990997355},"cuivre":{variantId:53423991030123},"blanc":{variantId:53423991062891},"noir":{variantId:53423991095659}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423991128427},"or":{variantId:53423991161195},"cuivre":{variantId:53423991193963},"blanc":{variantId:53423991226731},"noir":{variantId:53423991259499}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423991292267},"or":{variantId:53423991325035},"cuivre":{variantId:53423991357803},"blanc":{variantId:53423991390571},"noir":{variantId:53423991423339}}
+  },
+  "200x133mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423991456107},"or":{variantId:53423991488875},"cuivre":{variantId:53423991521643},"blanc":{variantId:53423991554411},"noir":{variantId:53423991587179},"gris":{variantId:53423991619947},"noyer":{variantId:53423991652715},"rose":{variantId:53423991685483}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423991718251},"or":{variantId:53423991751019},"cuivre":{variantId:53423991783787},"blanc":{variantId:53423991816555},"noir":{variantId:53423991849323}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423991882091},"or":{variantId:53423991914859},"cuivre":{variantId:53423991947627},"blanc":{variantId:53423991980395},"noir":{variantId:53423992013163}}
+  },
+  "250x167mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423993028971},"or":{variantId:53423993061739},"cuivre":{variantId:53423993094507},"blanc":{variantId:53423993127275},"noir":{variantId:53423993160043},"gris":{variantId:53423993192811},"noyer":{variantId:53423993225579},"rose":{variantId:53423993258347}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423993291115},"or":{variantId:53423993323883},"cuivre":{variantId:53423993356651},"blanc":{variantId:53423993389419},"noir":{variantId:53423993422187}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423993454955},"or":{variantId:53423993487723},"cuivre":{variantId:53423993520491},"blanc":{variantId:53423993553259},"noir":{variantId:53423993586027}}
+  },
+  "300x200mm":{
+    "1.6mm - À coller":{"acier-brosse":{variantId:53423993618795},"or":{variantId:53423993651563},"cuivre":{variantId:53423993684331},"blanc":{variantId:53423993717099},"noir":{variantId:53423993749867},"gris":{variantId:53423993782635},"noyer":{variantId:53423993815403},"rose":{variantId:53423993848171}},
+    "3.2mm - À coller":{"acier-brosse":{variantId:53423993880939},"or":{variantId:53423993913707},"cuivre":{variantId:53423993946475},"blanc":{variantId:53423993979243},"noir":{variantId:53423994012011}},
+    "3.2mm - À fixer":{"acier-brosse":{variantId:53423994044779},"or":{variantId:53423994077547},"cuivre":{variantId:53423994110315},"blanc":{variantId:53423994143083},"noir":{variantId:53423994175851}}
+  }
+};
+
 // ── DIMENSIONS canvas prod (px à 300dpi) ────────────────────────────────────
 const DIMENSION_MAP_BAL = {
   "60x15mm":   { w:709,  h:177  },
@@ -510,6 +534,12 @@ app.post("/api/variant/resolve", checkOrigin, async(req,res)=>{
     const fixation=req.body?.fixation||null,productHandle=req.body?.productHandle||null;
     const color=normalizeColor(rawColor),dimension=normalizeDimension(rawDim),thickness=normalizeThickness(rawThick);
     if(!dimension||!thickness||!color)return res.status(400).json({error:"Dimension, épaisseur ou couleur manquante."});
+    if(productHandle&&productHandle.includes("professionnel")){
+      const epFix=thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
+      const found=PROFESSIONNEL_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
+      if(found)return res.json(found);
+      return res.status(404).json({error:`Variant professionnel introuvable: ${dimension} / ${epFix} / ${color}`});
+    }
     if(productHandle&&productHandle.includes("famille")){
       const epFix=thickness+"mm - "+(fixation==="fixer"?"À fixer":"À coller");
       const found=FAMILLE_VARIANT_MAP?.[dimension]?.[epFix]?.[color];
@@ -1063,6 +1093,43 @@ async function renderProdFamille({ dimension, membres, animaux, nom, numero, fon
     .png().composite(composites).toBuffer();
 }
 
+// ── Génération fichier production RUE TEMPLATE ────────────────────────────────
+async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
+  const { data: tpl, error } = await supabase.from("rue_templates").select("*").eq("id", templateId).single();
+  if (error || !tpl) throw new Error(`Template RUE introuvable: ${templateId}`);
+
+  const dimKey = normalizeDimension(dimension);
+  const dims = DIMENSION_MAP_RUE[dimKey] || DIMENSION_MAP_RUE["200x133mm"];
+  const W = dims.w, H = dims.h;
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+
+  const zones = Array.isArray(tpl.zones) ? tpl.zones : [];
+  for (const z of zones) {
+    const text = (zoneValues[z.label || z.id] || zoneValues[z.id] || "").trim();
+    if (!text) continue;
+    const zx = (z.x / 100) * W, zy = (z.y / 100) * H;
+    const zw = (z.w / 100) * W, zh = (z.h / 100) * H;
+    let fontSize = Math.round(zh * 0.75);
+    const fontPre = (z.bold ? "bold " : "") + (z.italic ? "italic " : "");
+    ctx.font = `${fontPre}${fontSize}px "Baskvill", Arial, sans-serif`;
+    while (fontSize > 10 && ctx.measureText(text).width > zw * 0.95) {
+      fontSize -= 2;
+      ctx.font = `${fontPre}${fontSize}px "Baskvill", Arial, sans-serif`;
+    }
+    ctx.fillStyle = "#111111";
+    ctx.textAlign = z.align || "center";
+    ctx.textBaseline = "middle";
+    const tx = z.align === "left" ? zx + zw * 0.02 : z.align === "right" ? zx + zw * 0.98 : zx + zw / 2;
+    ctx.fillText(text, tx, zy + zh / 2);
+  }
+
+  return canvas.toBuffer("image/png");
+}
+
 // ── WEBHOOK SHOPIFY orders/paid ───────────────────────────────────────────────
 app.post("/webhook/orders-paid", async (req, res) => {
   const hmacHeader = req.headers["x-shopify-hmac-sha256"];
@@ -1154,6 +1221,17 @@ app.post("/webhook/orders-paid", async (req, res) => {
           numeroSize: Number(p["_numero_size"] || 100),
         });
         prodFilename = `prod-famille-${order.order_number}-${lineItemId}.png`;
+
+      } else if (pagType === "rue-template") {
+        const RUE_TPL_SKIP = new Set(["Dimension","Couleur","Couleur plaque","Épaisseur","Fixation"]);
+        const zoneValues = {};
+        Object.entries(p).forEach(([k, v]) => { if (!k.startsWith("_") && !RUE_TPL_SKIP.has(k)) zoneValues[k] = v; });
+        prodBuffer = await renderProdRueTemplate({
+          templateId: p["_template_id"] || "",
+          zoneValues,
+          dimension:  p["Dimension"] || "200x133mm",
+        });
+        prodFilename = `prod-rue-tpl-${order.order_number}-${lineItemId}.png`;
       }
 
       if (!prodBuffer) { console.warn(`[PAG Webhook] Buffer vide item ${lineItemId}`); continue; }
@@ -1199,6 +1277,9 @@ app.post("/webhook/orders-paid", async (req, res) => {
       } else if (pagType === "bal-template") {
         const zoneLines = Object.entries(p).filter(([k])=>!k.startsWith("_")&&k!=="Template").map(([k,v])=>`${k.padEnd(10)}: ${v}`).join("\n");
         notesParts.push(`${sep}\nPLAQUE TEMPLATE — Item #${lineItemId}\n${sep}\nTemplate   : ${p["_Template"]||p["_template_handle"]||"—"}\nPolice     : ${p["_Police"]||"—"}\n${zoneLines}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+      } else if (pagType === "rue-template") {
+        const zoneLines = Object.entries(p).filter(([k])=>!k.startsWith("_")).map(([k,v])=>`${k.padEnd(12)}: ${v}`).join("\n");
+        notesParts.push(`${sep}\nPLAQUE PRO TEMPLATE — Item #${lineItemId}\n${sep}\nTemplate   : ${p["_template_name"]||p["_template_id"]||"—"}\nDimension  : ${p["Dimension"]||"—"}\nCouleur    : ${colorLabel}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\n${zoneLines}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
       } else if (pagType === "famille") {
         notesParts.push(`${sep}\nPLAQUE FAMILLE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Épaisseur"]||"—"} mm\nFixation   : ${p["Fixation"]||"—"}\nNom        : ${p["Nom de famille"]||"—"}\nNuméro     : ${p["Numéro"]||"—"}\nPolice nom : ${p["Police nom"]||"—"}\nPolice pré : ${p["Police prénoms"]||"—"}\nMembres    : ${p["_membres"]||"—"}\nAnimaux    : ${p["_animaux"]||"—"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
       } else {
@@ -1277,6 +1358,61 @@ app.put("/api/templates/:id", checkAdminToken, async(req,res)=>{
 app.delete("/api/templates/:id", checkAdminToken, async(req,res)=>{
   try{
     const{error}=await supabase.from("templates").delete().eq("id",req.params.id);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── RUE TEMPLATES CRUD ────────────────────────────────────────────────────────
+
+app.get("/api/rue-templates", async(req,res)=>{
+  try{
+    const token=req.headers["x-admin-token"]||req.query.token||req.body?.token||"";
+    const isAdmin=token&&token===process.env.ADMIN_SECRET_TOKEN;
+    const showAll=req.query.all==="1"&&isAdmin;
+    let q=supabase.from("rue_templates").select("*").order("created_at",{ascending:false});
+    if(!showAll)q=q.eq("active",true);
+    const{data,error}=await q;
+    if(error)throw error;
+    res.json(data||[]);
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.get("/api/rue-templates/by-handle/:handle", async(req,res)=>{
+  try{
+    const{data,error}=await supabase.from("rue_templates").select("*").eq("shopify_product_handle",req.params.handle).eq("active",true);
+    if(error)throw error;
+    res.json(data||[]);
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.post("/api/rue-templates", checkAdminToken, async(req,res)=>{
+  try{
+    const{name,zones,shopify_product_handle}=req.body||{};
+    if(!name)return res.status(400).json({error:"name requis"});
+    const{data,error}=await supabase.from("rue_templates").insert({name,zones:zones||[],shopify_product_handle:shopify_product_handle||null,active:true}).select().single();
+    if(error)throw error;
+    res.json({ok:true,template:data});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.put("/api/rue-templates/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{name,zones,shopify_product_handle,active}=req.body||{};
+    const update={};
+    if(name!==undefined)update.name=name;
+    if(zones!==undefined)update.zones=zones;
+    if(shopify_product_handle!==undefined)update.shopify_product_handle=shopify_product_handle;
+    if(active!==undefined)update.active=active;
+    const{data,error}=await supabase.from("rue_templates").update(update).eq("id",req.params.id).select().single();
+    if(error)throw error;
+    res.json({ok:true,template:data});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.delete("/api/rue-templates/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{error}=await supabase.from("rue_templates").delete().eq("id",req.params.id);
     if(error)throw error;
     res.json({ok:true});
   }catch(e){res.status(500).json({error:e.message});}
