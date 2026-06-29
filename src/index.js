@@ -661,9 +661,7 @@ app.post("/api/realized/save", checkOrigin, uploadLimiter, async(req,res)=>{
     let finalUrl=localUrl;
     try{const result=await uploadImageToShopify(optimized,fileName,"Réalisation plaque");if(result?.url)finalUrl=result.url;}catch(e){console.warn("Realized Shopify upload failed:",e.message);}
     res.json({ok:true,url:finalUrl});
-    if(leftLogoUrl||rightLogoUrl){
-      (async()=>{try{await supabase.from("realized_plaques").insert({image_url:finalUrl,color:color||null,dimension:dimension||null,thickness:thickness||null,left_logo_url:leftLogoUrl||null,right_logo_url:rightLogoUrl||null,created_at:new Date().toISOString()});}catch(e){console.warn("Supabase realized error:",e.message);}})();
-    }
+    (async()=>{try{await supabase.from("realized_plaques").insert({image_url:finalUrl,color:color||null,dimension:dimension||null,thickness:thickness||null,left_logo_url:leftLogoUrl||null,right_logo_url:rightLogoUrl||null,created_at:new Date().toISOString()});}catch(e){console.warn("Supabase realized error:",e.message);}})();
   }catch(e){res.json({ok:false});}
 });
 
@@ -1109,22 +1107,31 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
 
   const zones = Array.isArray(tpl.zones) ? tpl.zones : [];
   for (const z of zones) {
-    const text = (zoneValues[z.label || z.id] || zoneValues[z.id] || "").trim();
-    if (!text) continue;
+    const key = z.label || z.id;
+    const rawText = (zoneValues[key] || "").trim();
+    if (!rawText) continue;
+    const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
     const zx = (z.x / 100) * W, zy = (z.y / 100) * H;
     const zw = (z.w / 100) * W, zh = (z.h / 100) * H;
-    let fontSize = Math.round(zh * 0.75);
+    const fontName = zoneValues["_police_" + key] || "Baskvill";
+    const fixedFs = parseInt(zoneValues["_taille_" + key]) || 0;
     const fontPre = (z.bold ? "bold " : "") + (z.italic ? "italic " : "");
-    ctx.font = `${fontPre}${fontSize}px "Baskvill", Arial, sans-serif`;
-    while (fontSize > 10 && ctx.measureText(text).width > zw * 0.95) {
-      fontSize -= 2;
-      ctx.font = `${fontPre}${fontSize}px "Baskvill", Arial, sans-serif`;
+    const lineH = zh / lines.length;
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      let fontSize = fixedFs || Math.round(lineH * 0.75);
+      ctx.font = `${fontPre}${fontSize}px "${fontName}", Arial, sans-serif`;
+      while (fontSize > 8 && ctx.measureText(line).width > zw * 0.95) {
+        fontSize -= 2;
+        ctx.font = `${fontPre}${fontSize}px "${fontName}", Arial, sans-serif`;
+      }
+      ctx.fillStyle = "#111111";
+      ctx.textAlign = z.align || "center";
+      ctx.textBaseline = "middle";
+      const tx = z.align === "left" ? zx + zw * 0.02 : z.align === "right" ? zx + zw * 0.98 : zx + zw / 2;
+      ctx.fillText(line, tx, zy + li * lineH + lineH / 2);
     }
-    ctx.fillStyle = "#111111";
-    ctx.textAlign = z.align || "center";
-    ctx.textBaseline = "middle";
-    const tx = z.align === "left" ? zx + zw * 0.02 : z.align === "right" ? zx + zw * 0.98 : zx + zw / 2;
-    ctx.fillText(text, tx, zy + zh / 2);
   }
 
   return canvas.toBuffer("image/png");
@@ -1225,7 +1232,10 @@ app.post("/webhook/orders-paid", async (req, res) => {
       } else if (pagType === "rue-template") {
         const RUE_TPL_SKIP = new Set(["Dimension","Couleur","Couleur plaque","Épaisseur","Fixation"]);
         const zoneValues = {};
-        Object.entries(p).forEach(([k, v]) => { if (!k.startsWith("_") && !RUE_TPL_SKIP.has(k)) zoneValues[k] = v; });
+        Object.entries(p).forEach(([k, v]) => {
+          if (k.startsWith("_police_") || k.startsWith("_taille_")) { zoneValues[k] = v; }
+          else if (!k.startsWith("_") && !RUE_TPL_SKIP.has(k)) { zoneValues[k] = v; }
+        });
         prodBuffer = await renderProdRueTemplate({
           templateId: p["_template_id"] || "",
           zoneValues,
@@ -1256,7 +1266,7 @@ app.post("/webhook/orders-paid", async (req, res) => {
       // ── INSERT realized_plaques — réalisation client ───────────────────────
       try {
         await supabase.from("realized_plaques").insert({
-          image_url:      prodUrl,
+          image_url:      previewUrl || prodUrl,
           color:          normalizeColor(p["Couleur plaque"] || p["Couleur"] || ""),
           dimension:      p["Dimension"] || null,
           thickness:      p["Epaisseur"] || p["Épaisseur"] || null,
