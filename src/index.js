@@ -1428,6 +1428,30 @@ app.delete("/api/rue-templates/:id", checkAdminToken, async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// ── Bot de votes automatiques galerie ────────────────────────────────────────
+const BOT_VOTES_PER_RUN = 20;         // nombre de logos votés à chaque session
+const BOT_INTERVAL_H    = 2;          // toutes les X heures
+const BOT_STARS_MIN     = 4;          // étoiles minimum (4 ou 5 pour garder une bonne moyenne)
+const BOT_STARS_MAX     = 5;
+
+async function autoRateGallery(){
+  try{
+    const{data:items,error}=await supabase.from("gallery_items").select("image_url").limit(500);
+    if(error||!items||!items.length)return;
+    // Mélange aléatoire et sélection de N items
+    const shuffled=items.sort(()=>Math.random()-0.5).slice(0,BOT_VOTES_PER_RUN);
+    for(const item of shuffled){
+      const stars=Math.floor(Math.random()*(BOT_STARS_MAX-BOT_STARS_MIN+1))+BOT_STARS_MIN;
+      await supabase.from("gallery_ratings").insert({image_url:item.image_url,stars});
+      // Petite pause entre chaque vote pour paraître naturel
+      await new Promise(r=>setTimeout(r,Math.round(Math.random()*3000+1000)));
+    }
+    console.log(`[BOT] ${shuffled.length} votes auto galerie (${BOT_STARS_MIN}-${BOT_STARS_MAX}★)`);
+  }catch(e){console.warn("[BOT] autoRateGallery error:",e.message);}
+}
+
+setInterval(autoRateGallery, BOT_INTERVAL_H * 60 * 60 * 1000);
+
 app.listen(PORT,()=>{
   console.log(`Server running on port ${PORT}`);
   console.log(`${fontFiles.length} polices configurées`);
@@ -1435,4 +1459,6 @@ app.listen(PORT,()=>{
   console.log("SHOPIFY_STORE présent :",!!process.env.SHOPIFY_STORE);
   console.log("SUPABASE_URL présent :",!!process.env.SUPABASE_URL);
   console.log("ALLOWED_ORIGINS :",process.env.ALLOWED_ORIGINS||"(non configuré)");
+  // Lancer un premier passage après 2 minutes
+  setTimeout(autoRateGallery, 2 * 60 * 1000);
 });
