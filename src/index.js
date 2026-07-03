@@ -1398,9 +1398,9 @@ app.get("/api/rue-templates/by-handle/:handle", async(req,res)=>{
 
 app.post("/api/rue-templates", checkAdminToken, async(req,res)=>{
   try{
-    const{name,zones,shopify_product_handle}=req.body||{};
+    const{name,zones,shopify_product_handle,gabarit_url}=req.body||{};
     if(!name)return res.status(400).json({error:"name requis"});
-    const{data,error}=await supabase.from("rue_templates").insert({name,zones:zones||[],shopify_product_handle:shopify_product_handle||null,active:true}).select().single();
+    const{data,error}=await supabase.from("rue_templates").insert({name,zones:zones||[],shopify_product_handle:shopify_product_handle||null,gabarit_url:gabarit_url||null,active:true}).select().single();
     if(error)throw error;
     res.json({ok:true,template:data});
   }catch(e){res.status(500).json({error:e.message});}
@@ -1408,12 +1408,13 @@ app.post("/api/rue-templates", checkAdminToken, async(req,res)=>{
 
 app.put("/api/rue-templates/:id", checkAdminToken, async(req,res)=>{
   try{
-    const{name,zones,shopify_product_handle,active}=req.body||{};
+    const{name,zones,shopify_product_handle,active,gabarit_url}=req.body||{};
     const update={};
     if(name!==undefined)update.name=name;
     if(zones!==undefined)update.zones=zones;
     if(shopify_product_handle!==undefined)update.shopify_product_handle=shopify_product_handle;
     if(active!==undefined)update.active=active;
+    if(gabarit_url!==undefined)update.gabarit_url=gabarit_url||null;
     const{data,error}=await supabase.from("rue_templates").update(update).eq("id",req.params.id).select().single();
     if(error)throw error;
     res.json({ok:true,template:data});
