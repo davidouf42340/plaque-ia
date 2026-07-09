@@ -1512,6 +1512,88 @@ app.delete("/api/famille-hd/personnages/:id", checkAdminToken, async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// ── FAMILLE COULEUR HD — Décors & Personnages ────────────────────────────────
+
+app.get("/api/famille-couleur-hd/decors", async(req,res)=>{
+  try{
+    const{data,error}=await supabase.from("famcolhd_decors").select("*").order("created_at",{ascending:false});
+    if(error)throw error;
+    res.json(data||[]);
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.post("/api/famille-couleur-hd/decors", checkAdminToken, uploadLimiter, async(req,res)=>{
+  try{
+    const{label,imageUrl,imageBase64,filename}=req.body||{};
+    if(!label)return res.status(400).json({error:"label requis"});
+    let url=imageUrl||null;
+    if(!url&&imageBase64){
+      const base64Data=imageBase64.replace(/^data:image\/\w+;base64,/,"");
+      const fileBuffer=Buffer.from(base64Data,"base64");
+      const fname="famcolhd-decor-"+Date.now()+"-"+(filename||"decor.png");
+      const optimized=await sharp(fileBuffer).resize(1400,null,{fit:"inside",withoutEnlargement:true}).png({compressionLevel:8}).toBuffer();
+      const result=await uploadImageToShopify(optimized,fname,"Décor Famille Couleur HD");
+      url=result.url;
+    }
+    if(!url)return res.status(400).json({error:"imageUrl ou imageBase64 requis"});
+    const{data,error}=await supabase.from("famcolhd_decors").insert({label,url}).select().single();
+    if(error)throw error;
+    res.json({ok:true,id:data.id,url:data.url});
+  }catch(e){console.error("famcolhd decor POST:",e.message);res.status(500).json({error:e.message});}
+});
+
+app.delete("/api/famille-couleur-hd/decors/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{error}=await supabase.from("famcolhd_decors").delete().eq("id",req.params.id);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.get("/api/famille-couleur-hd/personnages", async(req,res)=>{
+  try{
+    const{data,error}=await supabase.from("famcolhd_personnages").select("*").order("category").order("created_at",{ascending:true});
+    if(error)throw error;
+    const mapped=(data||[]).map(p=>({
+      id:p.id,category:p.category,label:p.label,url:p.url,
+      heightRatio:p.height_ratio,isAnimal:p.is_animal
+    }));
+    res.json(mapped);
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.post("/api/famille-couleur-hd/personnages", checkAdminToken, uploadLimiter, async(req,res)=>{
+  try{
+    const{label,category,heightRatio,isAnimal,imageUrl,imageBase64,filename}=req.body||{};
+    if(!label||!category)return res.status(400).json({error:"label et category requis"});
+    let url=imageUrl||null;
+    if(!url&&imageBase64){
+      const base64Data=imageBase64.replace(/^data:image\/\w+;base64,/,"");
+      const fileBuffer=Buffer.from(base64Data,"base64");
+      const fname="famcolhd-perso-"+Date.now()+"-"+(filename||"perso.png");
+      const optimized=await sharp(fileBuffer).resize(500,null,{fit:"inside",withoutEnlargement:true}).png({compressionLevel:8}).toBuffer();
+      const result=await uploadImageToShopify(optimized,fname,"Personnage Famille Couleur HD");
+      url=result.url;
+    }
+    if(!url)return res.status(400).json({error:"imageUrl ou imageBase64 requis"});
+    const{data,error}=await supabase.from("famcolhd_personnages").insert({
+      label,category,url,
+      height_ratio:parseFloat(heightRatio)||0.85,
+      is_animal:isAnimal===true||isAnimal==="true"
+    }).select().single();
+    if(error)throw error;
+    res.json({ok:true,id:data.id,url:data.url});
+  }catch(e){console.error("famcolhd perso POST:",e.message);res.status(500).json({error:e.message});}
+});
+
+app.delete("/api/famille-couleur-hd/personnages/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{error}=await supabase.from("famcolhd_personnages").delete().eq("id",req.params.id);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
 // ── Bot de votes automatiques galerie ────────────────────────────────────────
 const BOT_VOTES_PER_RUN = 20;         // nombre de logos votés à chaque session
 const BOT_INTERVAL_H    = 2;          // toutes les X heures
