@@ -1302,14 +1302,24 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
     const fixedFs = parseInt(zoneValues["_taille_" + key]) || 0;
     const fontPre = (z.bold ? "bold " : "") + (z.italic ? "italic " : "");
     const lineH = zh / lines.length;
+    // Une seule taille de police pour toutes les lignes de la zone (celle qui convient à la ligne la plus contraignante)
+    let fontSize = fixedFs || Math.round(lineH * 0.75);
+    if (!fixedFs) {
+      let commonFs = fontSize;
+      for (const line of lines) {
+        let fs = commonFs;
+        ctx.font = `${fontPre}${fs}px "${fontName}", Arial, sans-serif`;
+        while (fs > 8 && ctx.measureText(line).width > zw * 0.95) {
+          fs -= 2;
+          ctx.font = `${fontPre}${fs}px "${fontName}", Arial, sans-serif`;
+        }
+        if (fs < commonFs) commonFs = fs;
+      }
+      fontSize = commonFs;
+    }
+    ctx.font = `${fontPre}${fontSize}px "${fontName}", Arial, sans-serif`;
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
-      let fontSize = fixedFs || Math.round(lineH * 0.75);
-      ctx.font = `${fontPre}${fontSize}px "${fontName}", Arial, sans-serif`;
-      while (fontSize > 8 && ctx.measureText(line).width > zw * 0.95) {
-        fontSize -= 2;
-        ctx.font = `${fontPre}${fontSize}px "${fontName}", Arial, sans-serif`;
-      }
       ctx.fillStyle = "#111111";
       ctx.textAlign = z.align || "center";
       ctx.textBaseline = "middle";
