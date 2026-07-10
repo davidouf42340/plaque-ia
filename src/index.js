@@ -1142,8 +1142,9 @@ function famchdFillTextArc(ctx, text, cx, cy, curvature) {
 async function renderProdFamilleCouleur({
   dimension, membres, animaux, nom, numero, decorId,
   fontNom, fontPrenom, fontNumero, nomSize, numeroSize, prenomSize,
-  nomColor, prenomColor, numeroColor, prenomPosition,
+  nomColor, prenomColor, numeroColor,
   nomArc, numeroArc, shadowEnabled, shadowColor, shadowBlur,
+  prenomShadowEnabled, prenomShadowColor, prenomShadowBlur,
 }) {
   const dimKey = normalizeDimension(dimension);
   const dims = DIMENSION_MAP_FAMILLE[dimKey] || DIMENSION_MAP_FAMILLE["200x133mm"];
@@ -1207,7 +1208,6 @@ async function renderProdFamilleCouleur({
   const PRENOM_H = Math.round(H * 0.058);
   const CHAR_H = ZONE_H - PRENOM_H;
   const slotW = all.length > 0 ? CHARS_W / all.length : CHARS_W;
-  const above = prenomPosition === "above";
 
   // 3. Personnages en couleur naturelle
   for (let idx = 0; idx < all.length; idx++) {
@@ -1229,20 +1229,23 @@ async function renderProdFamilleCouleur({
           const dw = Math.max(1, Math.round(dh * (meta.width / meta.height)));
           const left = Math.max(0, Math.min(W - dw, cx - Math.round(dw / 2)));
           const top = Math.max(0, Math.round(TOP_H + CHAR_H - dh + offY * CHAR_H));
-          const resized = await sharp(pngBuf).resize(dw, dh, { fit:"fill" }).png().toBuffer();
+          let pipeline = sharp(pngBuf).resize(dw, dh, { fit:"fill" });
+          if (item.flipped) pipeline = pipeline.flop();
+          const resized = await pipeline.png().toBuffer();
           composites.push({ input: resized, left, top });
         }
       } catch (e) { console.warn(`[PAG Famille Couleur] perso ${item.type} error:`, e.message); }
     }
 
     if (item.prenom) {
+      const above = item.prenomPosition === "above";
       const ps = Math.max(8, Math.min(15, slotW/Math.max(1, item.prenom.length*0.7+2))) * ((prenomSize || 100)/100);
       ctx.font = `${ps}px "${fontPrenom || "Baskvill"}", Arial, sans-serif`;
       ctx.textAlign = "center"; ctx.textBaseline = above ? "bottom" : "top";
       ctx.fillStyle = prenomColor || "#111111";
       const py = above ? (TOP_H - 10) : (TOP_H + CHAR_H + 14);
       const pox = (item.prenomOX||0)*slotW, poy = (item.prenomOY||0)*CHAR_H;
-      famchdApplyShadow(ctx, shadowEnabled, shadowColor, shadowBlur);
+      famchdApplyShadow(ctx, prenomShadowEnabled, prenomShadowColor, prenomShadowBlur);
       ctx.fillText(item.prenom, cx+pox, py+poy);
       famchdClearShadow(ctx);
     }
@@ -1430,12 +1433,14 @@ app.post("/webhook/orders-paid", async (req, res) => {
           nomColor:       p["Couleur nom"]     || "#111111",
           prenomColor:    p["Couleur prénoms"] || "#111111",
           numeroColor:    p["Couleur numéro"]  || "#111111",
-          prenomPosition: p["_prenom_position"] || "below",
           nomArc:         Number(p["_nom_arc"]    || 0),
           numeroArc:      Number(p["_numero_arc"] || 0),
           shadowEnabled:  p["_shadow_enabled"] === "1",
           shadowColor:    p["_shadow_color"]   || "#000000",
           shadowBlur:     Number(p["_shadow_blur"] || 0),
+          prenomShadowEnabled: p["_prenom_shadow_enabled"] === "1",
+          prenomShadowColor:   p["_prenom_shadow_color"]   || "#000000",
+          prenomShadowBlur:    Number(p["_prenom_shadow_blur"] || 0),
         });
         prodFilename = `prod-famille-couleur-${order.order_number}-${lineItemId}.png`;
 
