@@ -1091,6 +1091,187 @@ async function renderProdFamille({ dimension, membres, animaux, nom, numero, fon
     .png().composite(composites).toBuffer();
 }
 
+// ── Génération fichier production FAMILLE COULEUR HD (impression UV couleur) ─
+const FAMCHD_CAT_HEIGHT = {
+  papa:0.85, maman:0.85, papy:0.85, mamie:0.85,
+  ado:0.75, adof:0.75, garcon:0.65, fille:0.65, bb:0.45,
+  chat:0.50, chien:0.50, "animal-autre":0.50,
+};
+
+function famchdApplyShadow(ctx, shadowEnabled, shadowColor, shadowBlur) {
+  if (shadowEnabled) {
+    ctx.shadowColor = shadowColor || "#000000";
+    ctx.shadowBlur = shadowBlur || 0;
+    ctx.shadowOffsetX = Math.round((shadowBlur||0)/2.5)+2;
+    ctx.shadowOffsetY = Math.round((shadowBlur||0)/2.5)+2;
+  } else {
+    famchdClearShadow(ctx);
+  }
+}
+function famchdClearShadow(ctx) {
+  ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+}
+/* Texte le long d'un arc (cintrage) — même algorithme que le configurateur client */
+function famchdFillTextArc(ctx, text, cx, cy, curvature) {
+  const amt = Math.max(0, Math.min(100, curvature||0)) / 100;
+  if (amt < 0.02 || !text) { ctx.fillText(text, cx, cy); return; }
+  const chars = text.split("");
+  const widths = chars.map(c => ctx.measureText(c).width);
+  const totalWidth = widths.reduce((a,b) => a+b, 0);
+  const totalAngle = amt * (Math.PI * 100/180);
+  const radius = totalWidth / totalAngle;
+  const savedAlign = ctx.textAlign;
+  ctx.save();
+  ctx.translate(cx, cy + radius);
+  ctx.textAlign = "center";
+  let angle = -totalAngle/2;
+  for (let i=0;i<chars.length;i++){
+    const w = widths[i];
+    const charAngle = w/radius;
+    angle += charAngle/2;
+    ctx.save();
+    ctx.rotate(angle);
+    ctx.fillText(chars[i], 0, -radius);
+    ctx.restore();
+    angle += charAngle/2;
+  }
+  ctx.restore();
+  ctx.textAlign = savedAlign;
+}
+
+async function renderProdFamilleCouleur({
+  dimension, membres, animaux, nom, numero, decorId,
+  fontNom, fontPrenom, fontNumero, nomSize, numeroSize, prenomSize,
+  nomColor, prenomColor, numeroColor, prenomPosition,
+  nomArc, numeroArc, shadowEnabled, shadowColor, shadowBlur,
+}) {
+  const dimKey = normalizeDimension(dimension);
+  const dims = DIMENSION_MAP_FAMILLE[dimKey] || DIMENSION_MAP_FAMILLE["200x133mm"];
+  const W = dims.w, H = dims.h;
+  const composites = [];
+
+  // 1. Décors + personnages en couleur depuis Supabase (aucun recolorage — impression UV)
+  const [{ data: decorsData }, { data: persosData }] = await Promise.all([
+    supabase.from("famcolhd_decors").select("*"),
+    supabase.from("famcolhd_personnages").select("*"),
+  ]);
+  const decorRow = decorId ? (decorsData||[]).find(d => String(d.id) === String(decorId)) : null;
+
+  if (decorRow && decorRow.url) {
+    try {
+      const decoResp = await fetch(decorRow.url);
+      if (decoResp.ok) {
+        const decoBuf = Buffer.from(await decoResp.arrayBuffer());
+        const decoResized = await sharp(decoBuf).resize(W, H, { fit:"fill" }).png().toBuffer();
+        composites.push({ input: decoResized, left: 0, top: 0 });
+      }
+    } catch (e) { console.warn("[PAG Famille Couleur] deco error:", e.message); }
+  }
+
+  // Regroupe les personnages par catégorie (comme côté client)
+  const persosByCat = {};
+  (persosData||[]).forEach(p => {
+    if (!persosByCat[p.category]) persosByCat[p.category] = [];
+    persosByCat[p.category].push(p);
+  });
+
+  // 2. Canvas texte (nom, prénoms, numéro) avec couleurs, ombre, cintrage
+  const textCanvas = createCanvas(W, H);
+  const ctx = textCanvas.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+
+  const nomLines = (nom || "").split("\n").map(l => l.trim()).filter(Boolean).slice(0, 3);
+  const NOM_AREA_TOP = Math.round(H * 0.04);
+  let TOP_H = Math.round(H * 0.24);
+  if (nomLines.length) {
+    const longest = nomLines.reduce((a, b) => a.length >= b.length ? a : b, "");
+    const nomBasePx = Math.min(H * 0.092, (W * 0.70) / Math.max(1, longest.length * 0.54 + 1));
+    const nomPx = Math.round(nomBasePx * ((nomSize || 100) / 100));
+    const nomLineH = Math.round(nomPx * 1.20);
+    const nomStartY = NOM_AREA_TOP + Math.round(nomPx * 0.5);
+    ctx.font = `bold ${nomPx}px "${fontNom || "Baskvill"}", Arial, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = nomColor || "#111111";
+    famchdApplyShadow(ctx, shadowEnabled, shadowColor, shadowBlur);
+    nomLines.forEach((line, li) => { famchdFillTextArc(ctx, line, Math.round(W * 0.49), nomStartY + li * nomLineH, nomArc); });
+    famchdClearShadow(ctx);
+    TOP_H = Math.max(TOP_H, Math.round(NOM_AREA_TOP + nomLines.length * nomLineH + nomPx * 0.5));
+  }
+
+  const all = [...(membres || []).map(m => ({...m, _isAnimal:false})), ...(animaux || []).map(a => ({...a, _isAnimal:true}))];
+  const numSizeFactor = (numeroSize || 100) / 100;
+  const showNum = !!(numero || "").trim();
+  const NUM_W = showNum ? Math.round(W * Math.min(0.40, Math.max(0.10, 0.10 + numSizeFactor * 0.14))) : 0;
+  const CHARS_W = W - NUM_W;
+  const ZONE_H = H - TOP_H - 6;
+  const PRENOM_H = Math.round(H * 0.058);
+  const CHAR_H = ZONE_H - PRENOM_H;
+  const slotW = all.length > 0 ? CHARS_W / all.length : CHARS_W;
+  const above = prenomPosition === "above";
+
+  // 3. Personnages en couleur naturelle
+  for (let idx = 0; idx < all.length; idx++) {
+    const item = all[idx];
+    const heightRatio = FAMCHD_CAT_HEIGHT[item.type] || 0.70;
+    const variants = persosByCat[item.type] || [];
+    const row = variants[item.variantIdx || 0];
+    const offX = item.offX || 0;
+    const offY = item.offY || 0;
+    const cx = Math.round(slotW * idx + slotW / 2 + offX * slotW);
+
+    if (row && row.url) {
+      try {
+        const pngResp = await fetch(row.url);
+        if (pngResp.ok) {
+          const pngBuf = Buffer.from(await pngResp.arrayBuffer());
+          const meta = await sharp(pngBuf).metadata();
+          const dh = Math.max(1, Math.round(CHAR_H * heightRatio * (item.scale || 1.0)));
+          const dw = Math.max(1, Math.round(dh * (meta.width / meta.height)));
+          const left = Math.max(0, Math.min(W - dw, cx - Math.round(dw / 2)));
+          const top = Math.max(0, Math.round(TOP_H + CHAR_H - dh + offY * CHAR_H));
+          const resized = await sharp(pngBuf).resize(dw, dh, { fit:"fill" }).png().toBuffer();
+          composites.push({ input: resized, left, top });
+        }
+      } catch (e) { console.warn(`[PAG Famille Couleur] perso ${item.type} error:`, e.message); }
+    }
+
+    if (item.prenom) {
+      const ps = Math.max(8, Math.min(15, slotW/Math.max(1, item.prenom.length*0.7+2))) * ((prenomSize || 100)/100);
+      ctx.font = `${ps}px "${fontPrenom || "Baskvill"}", Arial, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = above ? "bottom" : "top";
+      ctx.fillStyle = prenomColor || "#111111";
+      const py = above ? (TOP_H - 10) : (TOP_H + CHAR_H + 14);
+      const pox = (item.prenomOX||0)*slotW, poy = (item.prenomOY||0)*CHAR_H;
+      famchdApplyShadow(ctx, shadowEnabled, shadowColor, shadowBlur);
+      ctx.fillText(item.prenom, cx+pox, py+poy);
+      famchdClearShadow(ctx);
+    }
+  }
+
+  // Numéro (bas droite)
+  if (showNum) {
+    const numPx = Math.round(Math.min(NUM_W * 0.88, ZONE_H * 0.70) * numSizeFactor);
+    ctx.font = `bold ${numPx}px "${fontNumero || "Baskvill"}", Arial, sans-serif`;
+    ctx.fillStyle = numeroColor || "#111111"; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    const numBX = W - Math.round(W * 0.02), numBY = H - Math.round(H * 0.04);
+    famchdApplyShadow(ctx, shadowEnabled, shadowColor, shadowBlur);
+    if ((numeroArc||0) > 0) {
+      const numTW = ctx.measureText(numero).width;
+      famchdFillTextArc(ctx, numero, numBX-numTW/2, numBY, numeroArc);
+    } else {
+      ctx.fillText(numero, numBX, numBY);
+    }
+    famchdClearShadow(ctx);
+  }
+
+  const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+  composites.push({ input: textBuf, left: 0, top: 0 });
+
+  // Fond transparent — impression UV couleur, aucun remplissage
+  return sharp({ create:{ width:W, height:H, channels:4, background:{ r:0, g:0, b:0, alpha:0 } } })
+    .png().composite(composites).toBuffer();
+}
+
 // ── Génération fichier production RUE TEMPLATE ────────────────────────────────
 async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
   const { data: tpl, error } = await supabase.from("rue_templates").select("*").eq("id", templateId).single();
@@ -1228,6 +1409,35 @@ app.post("/webhook/orders-paid", async (req, res) => {
           numeroSize: Number(p["_numero_size"] || 100),
         });
         prodFilename = `prod-famille-${order.order_number}-${lineItemId}.png`;
+
+      } else if (pagType === "famille-couleur-hd") {
+        let membresC = [], animauxC = [];
+        try { membresC = JSON.parse(p["_membres"] || "[]"); } catch (e) {}
+        try { animauxC = JSON.parse(p["_animaux"] || "[]"); } catch (e) {}
+        prodBuffer = await renderProdFamilleCouleur({
+          dimension:      p["Dimension"]      || "200x133mm",
+          membres:        membresC,
+          animaux:        animauxC,
+          nom:            p["Nom de famille"] || "",
+          numero:         p["Numéro"]         || "",
+          decorId:        p["_decor"]         || "",
+          fontNom:        p["Police nom"]     || "Baskvill",
+          fontPrenom:     p["Police prénoms"] || "Baskvill",
+          fontNumero:     p["Police numéro"]  || "Baskvill",
+          nomSize:        Number(p["_nom_size"]     || 100),
+          numeroSize:     Number(p["_numero_size"]  || 100),
+          prenomSize:     Number(p["_prenom_size"]  || 100),
+          nomColor:       p["Couleur nom"]     || "#111111",
+          prenomColor:    p["Couleur prénoms"] || "#111111",
+          numeroColor:    p["Couleur numéro"]  || "#111111",
+          prenomPosition: p["_prenom_position"] || "below",
+          nomArc:         Number(p["_nom_arc"]    || 0),
+          numeroArc:      Number(p["_numero_arc"] || 0),
+          shadowEnabled:  p["_shadow_enabled"] === "1",
+          shadowColor:    p["_shadow_color"]   || "#000000",
+          shadowBlur:     Number(p["_shadow_blur"] || 0),
+        });
+        prodFilename = `prod-famille-couleur-${order.order_number}-${lineItemId}.png`;
 
       } else if (pagType === "rue-template") {
         const RUE_TPL_SKIP = new Set(["Dimension","Couleur","Couleur plaque","Épaisseur","Fixation"]);
