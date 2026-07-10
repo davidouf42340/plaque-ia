@@ -1283,21 +1283,58 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
   const dimKey = normalizeDimension(dimension);
   const dims = DIMENSION_MAP_RUE[dimKey] || DIMENSION_MAP_RUE["200x133mm"];
   const W = dims.w, H = dims.h;
+  const composites = [];
 
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, W, H);
+  // 1. Gabarit (silhouette/décor du template) — noir sur transparent
+  if (tpl.gabarit_url) {
+    try {
+      const gabBlack = await colorizeLogoBuffer(tpl.gabarit_url, true);
+      if (gabBlack) {
+        const resized = await sharp(gabBlack).resize(W, H, { fit: "fill" }).png().toBuffer();
+        composites.push({ input: resized, left: 0, top: 0 });
+      }
+    } catch (e) { console.warn("[PAG Rue Template] gabarit error:", e.message); }
+  }
 
   const zones = Array.isArray(tpl.zones) ? tpl.zones : [];
+  const textCanvas = createCanvas(W, H);
+  const ctx = textCanvas.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+
   for (const z of zones) {
     const key = z.label || z.id;
+    const ztype = z.type || "text";
+    const zx = (z.x / 100) * W, zy = (z.y / 100) * H;
+    const zw = (z.w / 100) * W, zh = (z.h / 100) * H;
+
+    if (ztype === "logo-catalog") {
+      const logoUrl = zoneValues["_logo_url_" + key];
+      if (!logoUrl) continue;
+      try {
+        const logoBlack = await colorizeLogoBuffer(logoUrl, true);
+        if (logoBlack) {
+          const meta = await sharp(logoBlack).metadata();
+          const aspect = (meta.width || 1) / (meta.height || 1);
+          let dW = zw * 0.95, dH = zw * 0.95 / aspect;
+          if (dH > zh * 0.95) { dH = zh * 0.95; dW = dH * aspect; }
+          dW = Math.max(1, Math.round(dW)); dH = Math.max(1, Math.round(dH));
+          const resized = await sharp(logoBlack).resize(dW, dH, { fit: "contain", background: { r:0,g:0,b:0,alpha:0 } }).png().toBuffer();
+          composites.push({ input: resized, left: Math.round(zx + (zw-dW)/2), top: Math.round(zy + (zh-dH)/2) });
+        }
+      } catch (e) { console.warn(`[PAG Rue Template] logo zone ${key} error:`, e.message); }
+      continue;
+    }
+
+    if (ztype === "image-import") {
+      // Image importée par le client : URL non capturée en amont pour le moment — zone ignorée côté production.
+      continue;
+    }
+
+    // Zones de type texte
     const rawText = (zoneValues[key] || "").trim();
     if (!rawText) continue;
     const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
     if (!lines.length) continue;
-    const zx = (z.x / 100) * W, zy = (z.y / 100) * H;
-    const zw = (z.w / 100) * W, zh = (z.h / 100) * H;
     const fontName = zoneValues["_police_" + key] || "Baskvill";
     const fixedFs = parseInt(zoneValues["_taille_" + key]) || 0;
     const fontPre = (z.bold ? "bold " : "") + (z.italic ? "italic " : "");
@@ -1328,7 +1365,11 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
     }
   }
 
-  return canvas.toBuffer("image/png");
+  const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+  composites.push({ input: textBuf, left: 0, top: 0 });
+
+  return sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .png().composite(composites).toBuffer();
 }
 
 // ── WEBHOOK SHOPIFY orders/paid ───────────────────────────────────────────────
@@ -1458,7 +1499,7 @@ app.post("/webhook/orders-paid", async (req, res) => {
         const RUE_TPL_SKIP = new Set(["Dimension","Couleur","Couleur plaque","Épaisseur","Fixation"]);
         const zoneValues = {};
         Object.entries(p).forEach(([k, v]) => {
-          if (k.startsWith("_police_") || k.startsWith("_taille_")) { zoneValues[k] = v; }
+          if (k.startsWith("_police_") || k.startsWith("_taille_") || k.startsWith("_logo_url_")) { zoneValues[k] = v; }
           else if (!k.startsWith("_") && !RUE_TPL_SKIP.has(k)) { zoneValues[k] = v; }
         });
         prodBuffer = await renderProdRueTemplate({
