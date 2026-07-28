@@ -1285,16 +1285,7 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
   const W = dims.w, H = dims.h;
   const composites = [];
 
-  // 1. Gabarit (silhouette/décor du template) — noir sur transparent
-  if (tpl.gabarit_url) {
-    try {
-      const gabBlack = await colorizeLogoBuffer(tpl.gabarit_url, true);
-      if (gabBlack) {
-        const resized = await sharp(gabBlack).resize(W, H, { fit: "fill" }).png().toBuffer();
-        composites.push({ input: resized, left: 0, top: 0 });
-      }
-    } catch (e) { console.warn("[PAG Rue Template] gabarit error:", e.message); }
-  }
+  // Pas de gabarit — fond transparent uniquement, texte et images du client en noir
 
   const zones = Array.isArray(tpl.zones) ? tpl.zones : [];
   const textCanvas = createCanvas(W, H);
@@ -1304,8 +1295,20 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
   for (const z of zones) {
     const key = z.label || z.id;
     const ztype = z.type || "text";
-    const zx = (z.x / 100) * W, zy = (z.y / 100) * H;
-    const zw = (z.w / 100) * W, zh = (z.h / 100) * H;
+
+    // Position de base (%) + offset client (stocké en fraction du canvas)
+    const posStr = zoneValues["_pos_" + key] || "";
+    const [pxFrac, pyFrac] = posStr ? posStr.split(",").map(Number) : [0, 0];
+    const offX = (pxFrac || 0) * W;
+    const offY = (pyFrac || 0) * H;
+
+    // Scale optionnel (fraction)
+    const scaleFactor = parseFloat(zoneValues["_scale_" + key] || "1") || 1;
+
+    const baseZx = (z.x / 100) * W, baseZy = (z.y / 100) * H;
+    const baseZw = (z.w / 100) * W * scaleFactor, baseZh = (z.h / 100) * H * scaleFactor;
+    const zx = baseZx + offX, zy = baseZy + offY;
+    const zw = baseZw, zh = baseZh;
 
     if (ztype === "logo-catalog") {
       const logoUrl = zoneValues["_logo_url_" + key];
@@ -1326,22 +1329,40 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
     }
 
     if (ztype === "image-import") {
-      // Image importée par le client : URL non capturée en amont pour le moment — zone ignorée côté production.
+      const importUrl = zoneValues["_import_url_" + key];
+      if (!importUrl) continue;
+      try {
+        const importBlack = await colorizeLogoBuffer(importUrl, true);
+        if (importBlack) {
+          const meta = await sharp(importBlack).metadata();
+          const aspect = (meta.width || 1) / (meta.height || 1);
+          let dW = zw * 0.95, dH = zw * 0.95 / aspect;
+          if (dH > zh * 0.95) { dH = zh * 0.95; dW = dH * aspect; }
+          dW = Math.max(1, Math.round(dW)); dH = Math.max(1, Math.round(dH));
+          const resized = await sharp(importBlack).resize(dW, dH, { fit: "contain", background: { r:0,g:0,b:0,alpha:0 } }).png().toBuffer();
+          composites.push({ input: resized, left: Math.round(zx + (zw-dW)/2), top: Math.round(zy + (zh-dH)/2) });
+        }
+      } catch (e) { console.warn(`[PAG Rue Template] image importée zone ${key} error:`, e.message); }
       continue;
     }
 
-    // Zones de type texte
+    // Zones texte
     const rawText = (zoneValues[key] || "").trim();
     if (!rawText) continue;
     const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
     if (!lines.length) continue;
     const fontName = zoneValues["_police_" + key] || "Baskvill";
-    const fixedFs = parseInt(zoneValues["_taille_" + key]) || 0;
+    // Taille: si le client a fixé une taille on la scale proportionnellement (la taille côté client est en px canvas)
+    const clientFs = parseInt(zoneValues["_taille_" + key]) || 0;
     const fontPre = (z.bold ? "bold " : "") + (z.italic ? "italic " : "");
     const lineH = zh / lines.length;
-    // Une seule taille de police pour toutes les lignes de la zone (celle qui convient à la ligne la plus contraignante)
-    let fontSize = fixedFs || Math.round(lineH * 0.75);
-    if (!fixedFs) {
+    let fontSize;
+    if (clientFs) {
+      // Convertir la taille client (px canvas 762px) en px serveur
+      fontSize = Math.round(clientFs * (W / 762));
+    } else {
+      // Auto-fit: taille qui rentre dans la zone
+      fontSize = Math.round(lineH * 0.75);
       let commonFs = fontSize;
       for (const line of lines) {
         let fs = commonFs;
@@ -1355,13 +1376,12 @@ async function renderProdRueTemplate({ templateId, zoneValues, dimension }) {
       fontSize = commonFs;
     }
     ctx.font = `${fontPre}${fontSize}px "${fontName}", Arial, sans-serif`;
+    ctx.fillStyle = "#111111";
+    ctx.textAlign = z.align || "center";
+    ctx.textBaseline = "middle";
     for (let li = 0; li < lines.length; li++) {
-      const line = lines[li];
-      ctx.fillStyle = "#111111";
-      ctx.textAlign = z.align || "center";
-      ctx.textBaseline = "middle";
       const tx = z.align === "left" ? zx + zw * 0.02 : z.align === "right" ? zx + zw * 0.98 : zx + zw / 2;
-      ctx.fillText(line, tx, zy + li * lineH + lineH / 2);
+      ctx.fillText(lines[li], tx, zy + li * lineH + lineH / 2);
     }
   }
 
@@ -1499,7 +1519,7 @@ app.post("/webhook/orders-paid", async (req, res) => {
         const RUE_TPL_SKIP = new Set(["Dimension","Couleur","Couleur plaque","Épaisseur","Fixation"]);
         const zoneValues = {};
         Object.entries(p).forEach(([k, v]) => {
-          if (k.startsWith("_police_") || k.startsWith("_taille_") || k.startsWith("_logo_url_")) { zoneValues[k] = v; }
+          if (k.startsWith("_police_") || k.startsWith("_taille_") || k.startsWith("_logo_url_") || k.startsWith("_import_url_")) { zoneValues[k] = v; }
           else if (!k.startsWith("_") && !RUE_TPL_SKIP.has(k)) { zoneValues[k] = v; }
         });
         prodBuffer = await renderProdRueTemplate({
