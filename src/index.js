@@ -244,6 +244,12 @@ const DIMENSION_MAP_BAL = {
   "200x50mm":  { w:2362, h:591  },
   "250x87mm":  { w:2953, h:1028 },
   "300x100mm": { w:3543, h:1181 },
+  // Plaque de porte
+  "80x35mm":   { w:945,  h:413  },
+  "100x44mm":  { w:1181, h:520  },
+  "120x52mm":  { w:1417, h:614  },
+  "140x61mm":  { w:1654, h:720  },
+  "160x70mm":  { w:1890, h:827  },
 };
 
 const DIMENSION_MAP_RUE = {
@@ -861,6 +867,76 @@ async function renderProdBAL({ dimension, color, lines, fontFamily, fontSize, te
   return composites.length > 0 ? base.composite(composites).toBuffer() : base.toBuffer();
 }
 
+// ── Génération fichier production PORTE (positions libres x/y) ──────────────
+async function renderProdPorte({ dimension, lines, fontFamily, textX, textY, textScale, textAlign, logos }) {
+  // Résolution pixels à 300 dpi — supporte les dimensions sur mesure
+  let W, H;
+  const dimKey = normalizeDimension(dimension);
+  if (DIMENSION_MAP_BAL[dimKey]) {
+    W = DIMENSION_MAP_BAL[dimKey].w; H = DIMENSION_MAP_BAL[dimKey].h;
+  } else {
+    const parts = dimension.replace(/mm/gi,"").split(/x/i);
+    const wMM = parseFloat(parts[0]) || 80;
+    const hMM = parseFloat(parts[1]) || 35;
+    W = Math.round(wMM / 25.4 * 300);
+    H = Math.round(hMM / 25.4 * 300);
+  }
+
+  const composites = [];
+
+  // ── Logos avec positions libres ──────────────────────────────────────────
+  for (const lo of (logos||[])) {
+    if (!lo.url) continue;
+    const colBuf = await colorizeLogoBuffer(lo.url, true);
+    if (!colBuf) continue;
+    const meta   = await sharp(colBuf).metadata();
+    const aspect = (meta.width||1) / (meta.height||1);
+    const scale  = Math.max(10, Math.min(400, lo.scale||90));
+    // Même ratio que le canvas client : largeur = W*scale/100*0.28, hauteur = H*scale/100*0.85
+    const zoneW  = Math.round(W * scale/100 * 0.28);
+    const zoneH  = Math.round(H * scale/100 * 0.85);
+    let drawW, drawH;
+    if (aspect > zoneW/zoneH) { drawW=zoneW; drawH=Math.round(zoneW/aspect); }
+    else                       { drawH=zoneH; drawW=Math.round(zoneH*aspect); }
+    drawW = Math.max(1, drawW); drawH = Math.max(1, drawH);
+    let resized = await sharp(colBuf).resize(drawW, drawH, { fit:"contain", background:{r:0,g:0,b:0,alpha:0} }).png().toBuffer();
+    if (lo.flipped) resized = await sharp(resized).flop().png().toBuffer();
+    // x, y sont les centres (fractions 0→1) — même convention que le canvas client
+    const imgLeft = Math.round(lo.x * W - drawW/2);
+    const imgTop  = Math.round(lo.y * H - drawH/2);
+    composites.push({ input:resized, left:Math.max(0,imgLeft), top:Math.max(0,imgTop) });
+  }
+
+  // ── Texte avec position libre ─────────────────────────────────────────────
+  const filteredLines = (lines||[]).filter(l => l.trim().length > 0);
+  if (filteredLines.length) {
+    const fontName = fontFamily || "Baskvill";
+    const align    = textAlign  || "center";
+    const scale    = Math.max(20, Math.min(400, textScale||100));
+    // Même calcul que le canvas client : H * scale/100 * 0.20
+    let scaledFs = Math.round(H * scale/100 * 0.20);
+    scaledFs = Math.max(8, Math.min(scaledFs, Math.round(H * 0.75)));
+    const lineH   = Math.round(scaledFs * 1.32);
+    const totalH  = lineH * (filteredLines.length - 1);
+    // textY est le centre vertical du bloc
+    const startCY = Math.round((textY||0.5) * H) - Math.round(totalH / 2);
+    const textCanvas = createCanvas(W, H);
+    const ctx = textCanvas.getContext("2d");
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = "#111111";
+    ctx.font = `bold ${scaledFs}px "${fontName}", Arial, sans-serif`;
+    ctx.textAlign    = align;
+    ctx.textBaseline = "middle";
+    const cx = Math.round((textX||0.5) * W);
+    filteredLines.forEach((line, i) => { ctx.fillText(line, cx, startCY + i*lineH); });
+    const textBuf = await sharp(textCanvas.toBuffer("image/png")).ensureAlpha().png().toBuffer();
+    composites.push({ input:textBuf, left:0, top:0 });
+  }
+
+  const base = sharp({ create:{ width:W, height:H, channels:4, background:{r:0,g:0,b:0,alpha:0} } }).png();
+  return composites.length > 0 ? base.composite(composites).toBuffer() : base.toBuffer();
+}
+
 // ── Génération fichier production RUE ────────────────────────────────────────
 async function renderProdRUE({ dimension, color, number, streetLines, fontFamily, numScale, streetScale, logoUrl, layout }) {
   const dimKey = normalizeDimension(dimension);
@@ -1439,6 +1515,35 @@ app.post("/webhook/orders-paid", async (req, res) => {
         });
         prodFilename = `prod-bal-${order.order_number}-${lineItemId}.png`;
 
+      } else if (pagType === "porte") {
+        const lines = [p["Ligne 1"]||"",p["Ligne 2"]||"",p["Ligne 3"]||"",p["Ligne 4"]||""].filter(l=>l.trim());
+        const porteLogos = [];
+        if (p["_logo_1_url"]) porteLogos.push({
+          url:     p["_logo_1_url"],
+          x:       parseFloat(p["_logo_1_x"]    || "0.15"),
+          y:       parseFloat(p["_logo_1_y"]    || "0.5"),
+          scale:   parseFloat(p["_logo_1_scale"]|| "90"),
+          flipped: p["_logo_1_flip"] === "true"
+        });
+        if (p["_logo_2_url"]) porteLogos.push({
+          url:     p["_logo_2_url"],
+          x:       parseFloat(p["_logo_2_x"]    || "0.85"),
+          y:       parseFloat(p["_logo_2_y"]    || "0.5"),
+          scale:   parseFloat(p["_logo_2_scale"]|| "90"),
+          flipped: p["_logo_2_flip"] === "true"
+        });
+        prodBuffer = await renderProdPorte({
+          dimension:  p["Dimension"]  || "80x35mm",
+          lines,
+          fontFamily: p["Police"]     || "Baskvill",
+          textX:      parseFloat(p["_text_x"]    || "0.5"),
+          textY:      parseFloat(p["_text_y"]    || "0.5"),
+          textScale:  parseFloat(p["_text_scale"]|| "100"),
+          textAlign:  p["Alignement"] || "center",
+          logos:      porteLogos,
+        });
+        prodFilename = `prod-porte-${order.order_number}-${lineItemId}.png`;
+
       } else if (pagType === "rue") {
         const sl = [p["Ligne 1 rue"]||"",p["Ligne 2 rue"]||"",p["Ligne 3 rue"]||""].filter(l=>l.trim());
         prodBuffer = await renderProdRUE({
@@ -1556,8 +1661,8 @@ app.post("/webhook/orders-paid", async (req, res) => {
           color:          normalizeColor(p["Couleur plaque"] || p["Couleur"] || ""),
           dimension:      p["Dimension"] || null,
           thickness:      p["Epaisseur"] || p["Épaisseur"] || null,
-          left_logo_url:  pagType === "bal" ? (p["_logo_gauche"] || null) : null,
-          right_logo_url: pagType === "bal" ? (p["_logo_droite"] || null) : (p["_logo_url"] || null),
+          left_logo_url:  (pagType === "bal" || pagType === "porte") ? (p["_logo_gauche"] || null) : null,
+          right_logo_url: (pagType === "bal" || pagType === "porte") ? (p["_logo_droite"] || null) : (p["_logo_url"] || null),
           created_at:     new Date().toISOString(),
         });
         console.log(`[PAG Webhook] ✅ realized_plaques inséré — #${order.order_number}/${lineItemId}`);
@@ -1570,6 +1675,8 @@ app.post("/webhook/orders-paid", async (req, res) => {
 
       if (pagType === "bal") {
         notesParts.push(`${sep}\nPLAQUE BAL — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Epaisseur"]||"—"} mm\nPolice     : ${p["Police"]||"—"}\nAlignement : ${p["Alignement"]||"—"}\nTexte      : ${[p["Ligne 1"],p["Ligne 2"],p["Ligne 3"],p["Ligne 4"]].filter(Boolean).join(" / ")||"—"}\nLogo G     : ${p["_logo_gauche"]||"aucun"}\nLogo D     : ${p["_logo_droite"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
+      } else if (pagType === "porte") {
+        notesParts.push(`${sep}\nPLAQUE PORTE — Item #${lineItemId}\n${sep}\nCouleur    : ${colorLabel}\nDimension  : ${p["Dimension"]||"—"}\nÉpaisseur  : ${p["Epaisseur"]||"—"} mm\nPolice     : ${p["Police"]||"—"}\nAlignement : ${p["Alignement"]||"—"}\nTexte      : ${[p["Ligne 1"],p["Ligne 2"],p["Ligne 3"],p["Ligne 4"]].filter(Boolean).join(" / ")||"—"}\nLogo G     : ${p["_logo_gauche"]||"aucun"}\nLogo D     : ${p["_logo_droite"]||"aucun"}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
       } else if (pagType === "bal-template") {
         const zoneLines = Object.entries(p).filter(([k])=>!k.startsWith("_")&&k!=="Template").map(([k,v])=>`${k.padEnd(10)}: ${v}`).join("\n");
         notesParts.push(`${sep}\nPLAQUE TEMPLATE — Item #${lineItemId}\n${sep}\nTemplate   : ${p["_Template"]||p["_template_handle"]||"—"}\nPolice     : ${p["_Police"]||"—"}\n${zoneLines}\n${sep}\n📎 Aperçu client  : ${previewUrl||"—"}\n🖨️  Fichier prod   : ${prodUrl}\n${sep}`);
