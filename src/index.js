@@ -1987,6 +1987,71 @@ app.delete("/api/famille-couleur-hd/personnages/:id", checkAdminToken, async(req
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// ── Bibliothèque personnages PORTE Couleur (indépendante de Famille HD Couleur) ─
+app.get("/api/porte-couleur/personnages", async(req,res)=>{
+  try{
+    const{data,error}=await supabase.from("porte_couleur_personnages").select("*").order("category").order("created_at",{ascending:true});
+    if(error)throw error;
+    const mapped=(data||[]).map(p=>({
+      id:p.id,category:p.category,label:p.label,url:p.url,
+      heightRatio:p.height_ratio,isAnimal:p.is_animal
+    }));
+    res.json(mapped);
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.post("/api/porte-couleur/personnages", checkAdminToken, uploadLimiter, async(req,res)=>{
+  try{
+    const{label,category,heightRatio,isAnimal,imageUrl,imageBase64,filename}=req.body||{};
+    if(!label||!category)return res.status(400).json({error:"label et category requis"});
+    let url=imageUrl||null;
+    if(!url&&imageBase64){
+      const base64Data=imageBase64.replace(/^data:image\/\w+;base64,/,"");
+      const fileBuffer=Buffer.from(base64Data,"base64");
+      const fname="porte-coul-perso-"+Date.now()+"-"+(filename||"perso.png");
+      const optimized=await sharp(fileBuffer).resize(500,null,{fit:"inside",withoutEnlargement:true}).png({compressionLevel:8}).toBuffer();
+      const result=await uploadImageToShopify(optimized,fname,"Personnage Porte Couleur");
+      url=result.url;
+    }
+    if(!url)return res.status(400).json({error:"imageUrl ou imageBase64 requis"});
+    const{data,error}=await supabase.from("porte_couleur_personnages").insert({
+      label,category,url,
+      height_ratio:parseFloat(heightRatio)||0.85,
+      is_animal:isAnimal===true||isAnimal==="true"
+    }).select().single();
+    if(error)throw error;
+    res.json({ok:true,id:data.id,url:data.url});
+  }catch(e){console.error("porte-couleur perso POST:",e.message);res.status(500).json({error:e.message});}
+});
+
+app.delete("/api/porte-couleur/personnages/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{error}=await supabase.from("porte_couleur_personnages").delete().eq("id",req.params.id);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// Copier tous les personnages Famille HD Couleur dans la bibliothèque PORTE Couleur
+app.post("/api/porte-couleur/personnages/copy-from-fchd", checkAdminToken, async(req,res)=>{
+  try{
+    const{data:fchd,error:errFchd}=await supabase.from("famcolhd_personnages").select("*");
+    if(errFchd)throw errFchd;
+    if(!fchd||!fchd.length)return res.json({ok:true,copied:0});
+    // Récupérer les URL déjà présentes pour éviter les doublons
+    const{data:existing}=await supabase.from("porte_couleur_personnages").select("url");
+    const existingUrls=new Set((existing||[]).map(r=>r.url));
+    const toInsert=fchd.filter(p=>!existingUrls.has(p.url)).map(p=>({
+      label:p.label,category:p.category,url:p.url,
+      height_ratio:p.height_ratio||0.85,is_animal:p.is_animal||false
+    }));
+    if(!toInsert.length)return res.json({ok:true,copied:0,message:"Tous déjà présents"});
+    const{error:errIns}=await supabase.from("porte_couleur_personnages").insert(toInsert);
+    if(errIns)throw errIns;
+    res.json({ok:true,copied:toInsert.length});
+  }catch(e){console.error("copy-from-fchd:",e.message);res.status(500).json({error:e.message});}
+});
+
 // ── Bot de votes automatiques galerie ────────────────────────────────────────
 const BOT_VOTES_PER_RUN = 20;         // nombre de logos votés à chaque session
 const BOT_INTERVAL_H    = 2;          // toutes les X heures
