@@ -2043,6 +2043,34 @@ app.delete("/api/porte-couleur/personnages/category/:cat", checkAdminToken, asyn
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// Modifier un personnage (category, label, heightRatio)
+app.put("/api/porte-couleur/personnages/:id", checkAdminToken, async(req,res)=>{
+  try{
+    const{label,category,heightRatio}=req.body||{};
+    const updates={};
+    if(label!==undefined) updates.label=label;
+    if(category!==undefined) updates.category=category.toLowerCase().trim();
+    if(heightRatio!==undefined) updates.height_ratio=parseFloat(heightRatio)||0.85;
+    if(!Object.keys(updates).length) return res.status(400).json({error:"Rien à mettre à jour"});
+    const{error}=await supabase.from("porte_couleur_personnages").update(updates).eq("id",req.params.id);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// Renommer une catégorie entière
+app.put("/api/porte-couleur/personnages/category/:cat", checkAdminToken, async(req,res)=>{
+  try{
+    const oldCat=req.params.cat;
+    const{newCategory}=req.body||{};
+    if(!newCategory) return res.status(400).json({error:"newCategory requis"});
+    const newCat=newCategory.toLowerCase().trim();
+    const{error}=await supabase.from("porte_couleur_personnages").update({category:newCat}).eq("category",oldCat);
+    if(error)throw error;
+    res.json({ok:true,newCategory:newCat});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
 // Copier tous les personnages Famille HD Couleur dans la bibliothèque PORTE Couleur
 app.post("/api/porte-couleur/personnages/copy-from-fchd", checkAdminToken, async(req,res)=>{
   try{
