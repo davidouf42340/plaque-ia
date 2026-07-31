@@ -2032,6 +2032,17 @@ app.delete("/api/porte-couleur/personnages/:id", checkAdminToken, async(req,res)
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// Supprimer toute une catégorie
+app.delete("/api/porte-couleur/personnages/category/:cat", checkAdminToken, async(req,res)=>{
+  try{
+    const cat=req.params.cat;
+    if(!cat)return res.status(400).json({error:"category requise"});
+    const{error}=await supabase.from("porte_couleur_personnages").delete().eq("category",cat);
+    if(error)throw error;
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
 // Copier tous les personnages Famille HD Couleur dans la bibliothèque PORTE Couleur
 app.post("/api/porte-couleur/personnages/copy-from-fchd", checkAdminToken, async(req,res)=>{
   try{
