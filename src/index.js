@@ -51,7 +51,7 @@ const fontFiles = [
   "Galada","Greatvibes","Hujan","Julius","Justme","Luxes",
   "Manuscript","Marckscript","Meaculpa","Merienda","Newrocker",
   "Parisienne","Passionone","Playbill","Pompiere","Rammettoone",
-  "Rancho","Rye","Seves","Sylfaen","Walto","Wendy"
+  "Rancho","Rye","Seves","Sylfaen","Walto","Wendy","Arimo"
 ];
 
 for (const name of fontFiles) {
